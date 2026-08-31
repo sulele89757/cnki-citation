@@ -49,7 +49,7 @@ CNKI_HOME = "https://www.cnki.net"
 
 # ── 版本与更新检测（Gitee Releases）──
 # 发布流程：在 Gitee 仓库「发行版」页创建 Release（tag 如 v1.0.1），工具启动时比对最新 tag
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.0.4"
 GITEE_OWNER = "sulele"           # Gitee 用户名（与 build_release.py / .github/workflows/sync_gitee.py 保持一致）
 GITEE_REPO = "cnki-citation"      # Gitee 仓库名
 # 私有仓库必须带 token 才能访问 Releases API；公开仓库留空即可。
@@ -73,7 +73,8 @@ def check_update() -> dict:
     """检测 Gitee 仓库最新 Release。
 
     返回:
-      {"has_update": bool, "latest": str, "url": str, "notes": str}
+      {"has_update": bool, "latest": str, "url": str, "notes": str,
+       "download_url": str}  # exe 直接下载链接（若有）
       仓库未配置 / 出错时返回 {"has_update": False, "skipped": True} 或 {"has_update": False, "error": str}
     """
     if GITEE_OWNER in ("", "你的Gitee用户名"):
@@ -90,11 +91,40 @@ def check_update() -> dict:
         if not latest:
             return {"has_update": False}
         has = _norm_ver(latest) > _norm_ver(APP_VERSION)
+
+        # 尝试获取 exe 附件的直接下载链接
+        download_url = ""
+        release_id = data.get("id")
+        if release_id and GITEE_TOKEN:
+            try:
+                att_url = (f"https://gitee.com/api/v5/repos/{GITEE_OWNER}/{GITEE_REPO}"
+                           f"/releases/{release_id}/attach_files"
+                           f"?access_token={GITEE_TOKEN}")
+                att_req = urllib.request.Request(att_url,
+                                                headers={"User-Agent": "CNKI-Citation-Tool"})
+                with urllib.request.urlopen(att_req, timeout=10) as att_resp:
+                    attachments = json.loads(att_resp.read().decode("utf-8"))
+                if isinstance(attachments, list):
+                    for a in attachments:
+                        name = (a.get("name") or "").lower()
+                        if name.endswith(".exe"):
+                            aid = a.get("id")
+                            # 私有仓库的 browser_download_url 不带 token 会 403，
+                            # 改用 Gitee API 附件下载接口（带 access_token 可正常鉴权）。
+                            download_url = (
+                                f"https://gitee.com/api/v5/repos/{GITEE_OWNER}/{GITEE_REPO}"
+                                f"/releases/{release_id}/attach_files/{aid}/download"
+                                f"?access_token={GITEE_TOKEN}")
+                            break
+            except Exception:
+                pass  # 下载链接拿不到不影响基本检测
+
         return {
             "has_update": has,
             "latest": latest,
-            "url": data.get("html_url", ""),
+            "url": data.get("html_url") or "",
             "notes": (data.get("body") or "").strip(),
+            "download_url": download_url,
         }
     except Exception as e:
         return {"has_update": False, "error": str(e)}

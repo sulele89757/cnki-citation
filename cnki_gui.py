@@ -7,6 +7,8 @@ import os
 import re
 import sys
 import shutil
+import tempfile
+import urllib.request
 import webbrowser
 import threading
 import asyncio
@@ -713,17 +715,106 @@ class CNKIGui:
             return
         if res.get("has_update"):
             self.status_label.configure(text="↻ 有新版本")
-            self._log(f"[更新] 发现新版本 {res.get('latest')}！发布页：{res.get('url')}")
-            ans = messagebox.askyesno(
-                "发现新版本",
-                f"当前版本：v{APP_VERSION}\n最新版本：{res.get('latest')}\n\n"
-                f"是否打开发布页下载更新？")
-            if ans and res.get("url"):
-                webbrowser.open(res.get("url"))
+            self._log(f"[更新] 发现新版本 {res.get('latest')}！")
+            dl_url = res.get("download_url", "")
+            if dl_url:
+                # 有 exe 直接下载链接 → 走自更新
+                ans = messagebox.askyesno(
+                    "发现新版本",
+                    f"当前版本：v{APP_VERSION}\n最新版本：{res.get('latest')}\n\n"
+                    f"是否立即下载并自动更新？")
+                if ans:
+                    self._do_self_update(dl_url, res.get("latest", ""))
+            else:
+                # 无下载链接 → fallback 打开发布页
+                ans = messagebox.askyesno(
+                    "发现新版本",
+                    f"当前版本：v{APP_VERSION}\n最新版本：{res.get('latest')}\n\n"
+                    f"是否打开发布页手动下载？")
+                if ans and res.get("url"):
+                    webbrowser.open(res["url"])
         else:
             if not silent:
                 messagebox.showinfo("检查更新", f"已是最新版本 v{APP_VERSION}")
             self._log("[更新] 已是最新版本")
+
+    def _do_self_update(self, download_url, version):
+        """自更新：下载新 exe → 写 bat 替换脚本 → 退出 → bat 接管替换并重启"""
+        self._log(f"[更新] 开始下载 {version} ...")
+        self.status_label.configure(text="⬇ 下载更新中...")
+
+        def _download():
+            last_pct = -1
+            try:
+                new_exe = os.path.join(tempfile.gettempdir(), "CNKI引文工具_new.exe")
+                req = urllib.request.Request(
+                    download_url, headers={"User-Agent": "CNKI-Citation-Tool-Updater"})
+                with urllib.request.urlopen(req, timeout=600) as resp:
+                    total = int(resp.headers.get("Content-Length", 0) or 0)
+                    downloaded = 0
+                    with open(new_exe, "wb") as f:
+                        while True:
+                            chunk = resp.read(65536)
+                            if not chunk:
+                                break
+                            f.write(chunk)
+                            downloaded += len(chunk)
+                            if total > 0:
+                                pct = min(100, downloaded * 100 // total)
+                                # 每 5% 才记录一次日志，避免刷屏；状态栏实时更新
+                                if pct - last_pct >= 5 or (pct == 100 and last_pct != 100):
+                                    last_pct = pct
+                                    mb = downloaded // (1024 * 1024)
+                                    total_mb = total // (1024 * 1024)
+                                    self.root.after(0, lambda p=pct, m=mb, t=total_mb: (
+                                        self.status_label.configure(text=f"⬇ 下载中 {p}% ({m}/{t}MB)"),
+                                        self._log(f"[更新] 下载进度: {p}% ({m}/{t}MB)")
+                                    ))
+                                else:
+                                    mb = downloaded // (1024 * 1024)
+                                    total_mb = total // (1024 * 1024)
+                                    self.root.after(0, lambda p=pct, m=mb, t=total_mb: (
+                                        self.status_label.configure(text=f"⬇ 下载中 {p}% ({m}/{t}MB)")
+                                    ))
+
+                self.root.after(0, lambda: self._write_updater_bat(new_exe))
+            except Exception as e:
+                self.root.after(0, lambda e=e: (
+                    self.status_label.configure(text="✗ 下载失败"),
+                    messagebox.showerror("更新失败", f"下载新版本失败：\n{e}"),
+                    self._log(f"[更新] 下载失败: {e}")
+                ))
+
+        threading.Thread(target=_download, daemon=True).start()
+
+    def _write_updater_bat(self, new_exe_path):
+        """写 bat 替换脚本，然后退出当前程序。bat 会：等进程退出 → 替换 exe → 启动新版 → 自删"""
+        import win32api
+        current_exe = win32api.GetModuleFileName(0)  # 当前运行的 exe 绝对路径
+        bat_path = os.path.join(tempfile.gettempdir(), "update_cnki.bat")
+
+        # bat 脚本：等待原进程退出 → 替换 → 启动新版 → 删除自身
+        bat_content = (
+            "@echo off\r\n"
+            f'title CNKI 引文工具 - 更新中...\r\n'
+            "chcp 65001 >nul\r\n"
+            "echo 正在更新，请稍候...\r\n"
+            "echo 等待旧版本关闭...\r\n"
+            ":wait_loop\r\n"
+            f'ping -n 2 127.0.0.1 >nul 2>&1\r\n'
+            f'if exist "{current_exe}" goto wait_loop\r\n'
+            "echo 旧版本已关闭，正在替换文件...\r\n"
+            f'move /Y "{new_exe_path}" "{current_exe}"\r\n'
+            "echo 更新完成！正在启动新版本...\r\n"
+            f'start "" "{current_exe}"\r\n'
+            'del "%~f0"\r\n'
+        )
+        with open(bat_path, "w", encoding="gbk") as f:
+            f.write(bat_content)
+
+        self._log("[更新] 下载完成，即将重启...")
+        # 延迟一点退出，让用户看到"下载完成"提示
+        self.root.after(800, self._quit)
 
     # ════════════════════════════════════════════
     #  系统托盘
@@ -757,7 +848,8 @@ class CNKIGui:
         self._tray_icon = pystray.Icon(
             "CNKI引文工具", self._make_tray_icon(),
             "CNKI 论文引文获取工具", menu)
-        threading.Thread(target=self._tray_icon.run, daemon=True).start()
+        # 非守护线程：保证窗口隐藏（withdraw）后进程仍存活，靠托盘图标常驻
+        threading.Thread(target=self._tray_icon.run, daemon=False).start()
 
     def _restore(self):
         # 托盘常驻：仅恢复窗口，不销毁托盘图标
