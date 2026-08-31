@@ -1,0 +1,15 @@
+# CNKI 论文引文获取工具 — 依赖清单
+# 适用 Python 3.12+（customtkinter 依赖系统 Python 自带的 tkinter；本机用系统 Python 3.12 建 venv）
+# 安装：pip install -r requirements.txt
+# 浏览器：优先复用系统 Google Chrome；若需内置 Chromium，额外执行 `playwright install chromium`
+
+# ── 运行时依赖 ──
+playwright==1.62.0          # 浏览器自动化（系统 Chrome / 内置 Chromium）
+playwright-stealth==2.0.3   # 隐藏 navigator.webdriver 等自动化特征
+openpyxl==3.1.5             # Excel 批量读取与回填
+customtkinter==6.0.0        # GUI（跟随系统主题）
+
+# ── 构建 / 开发依赖 ──
+Pillow==12.3.0              # 生成 app.ico 图标 + 托盘图标
+pystray==0.19.5             # 系统托盘（最小化到状态栏）
+pyinstaller==6.22.2         # 打包单文件 exe（--onefile --windowed）
