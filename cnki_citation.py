@@ -55,7 +55,10 @@ GITEE_REPO = "cnki-citation"      # Gitee 仓库名
 # 私有仓库必须带 token 才能访问 Releases API；公开仓库留空即可。
 # 注意：此 token 会被打包进 exe，任何人可反编译提取，故务必用「只读」令牌，
 # 且只授予本仓库，切勿用有写权限的令牌（发布用单独的写令牌，见 build_release.py）。
-GITEE_TOKEN = ""                  # TODO: 填一个「只读」个人令牌(PAT)，用于检测更新
+# 用于检测更新的 Gitee 令牌（当前取自 .release_token 的写令牌；
+# ⚠️ 安全提示：写令牌嵌进 exe 后，任何能反编译 exe 的人都能拿到它并拥有该仓库的写权限。
+# 生产环境强烈建议改用「只读」PAT（Gitee→设置→私人令牌，仅勾 projects/releases 只读）。
+GITEE_TOKEN = "7fdea635702f2c7d1005de1620476aa1"
 GITEE_API = f"https://gitee.com/api/v5/repos/{GITEE_OWNER}/{GITEE_REPO}/releases/latest"
 
 

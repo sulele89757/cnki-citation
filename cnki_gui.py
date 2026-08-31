@@ -23,6 +23,43 @@ import cnki_citation as core
 APP_VERSION = core.APP_VERSION
 
 
+# ── 单例锁：防止启动多个实例（Windows Mutex）──
+def _check_singleton():
+    """若已有实例在运行，弹出提示并退出。返回 True 表示可继续。"""
+    try:
+        import win32event
+        import win32api
+        import winerror
+        _SINGLETON_MUTEX_NAME = "CNKI_Citation_Tool_Singleton_Mutex"
+        handle = win32event.CreateMutex(None, False, _SINGLETON_MUTEX_NAME)
+        if win32api.GetLastError() == winerror.ERROR_ALREADY_EXISTS:
+            # 已有实例：尝试激活其窗口后退出
+            try:
+                import win32gui
+                hwnd = win32gui.FindWindow(None, "CNKI 引文工具")
+                if hwnd:
+                    if win32gui.IsIconic(hwnd):
+                        win32gui.ShowWindow(hwnd, 9)  # SW_RESTORE
+                    win32gui.SetForegroundWindow(hwnd)
+            except Exception:
+                pass
+            # 用 tkinter 弹提示（此时 root 尚未创建，用简易弹窗）
+            import tkinter as tk
+            r = tk.Tk()
+            r.withdraw()
+            r.after(100, lambda: (
+                messagebox.showinfo("提示", "CNKI 引文工具已在运行中。\n"
+                                     "请查看系统托盘或任务栏中的窗口。"),
+                r.destroy()
+            ))
+            r.mainloop()
+            return False
+        return True
+    except ImportError:
+        # pywin32 不可用时（开发环境可能缺），跳过单例检查
+        return True
+
+
 class CNKIGui:
     def __init__(self):
         self.root = ctk.CTk()
@@ -705,8 +742,10 @@ class CNKIGui:
         return img
 
     def _on_close(self):
+        # 点 X：仅隐藏窗口，托盘图标保持常驻（若意外未创建则补建）
         self.root.withdraw()
-        self._show_tray()
+        if self._tray_icon is None:
+            self._show_tray()
 
     def _show_tray(self):
         if self._tray_icon is not None:
@@ -721,9 +760,7 @@ class CNKIGui:
         threading.Thread(target=self._tray_icon.run, daemon=True).start()
 
     def _restore(self):
-        if self._tray_icon is not None:
-            self._tray_icon.stop()
-            self._tray_icon = None
+        # 托盘常驻：仅恢复窗口，不销毁托盘图标
         self.root.after(0, self.root.deiconify)
 
     def _quit(self):
@@ -733,9 +770,12 @@ class CNKIGui:
         self.root.after(0, self.root.destroy)
 
     def run(self):
+        # 启动时即在系统托盘常驻显示图标（窗口打开时也能看到）
+        self._show_tray()
         self.root.after(2500, lambda: self._check_update(silent=True))
         self.root.mainloop()
 
 
 if __name__ == "__main__":
-    CNKIGui().run()
+    if _check_singleton():
+        CNKIGui().run()

@@ -126,17 +126,17 @@ def upload_asset(owner, repo, token, release_id, exe_path, max_retries=3):
     for attempt in range(1, max_retries + 1):
         conn = None
         try:
-            print(f"[sync] 第 {attempt}/{max_retries} 次尝试：连接 Gitee ...")
+            print(f"[sync] 第 {attempt}/{max_retries} 次尝试：连接 Gitee ...", flush=True)
             conn = http.client.HTTPSConnection(
                 parsed.hostname, parsed.port or 443, timeout=600)
             conn.connect()
-            print(f"[sync] 已连接，构建 HTTP 请求头 ...")
+            print(f"[sync] 已连接，构建 HTTP 请求头 ...", flush=True)
             conn.putrequest("POST", parsed.path + ("?" + parsed.query if parsed.query else ""))
             conn.putheader("Content-Type", f"multipart/form-data; boundary={boundary}")
             conn.putheader("Content-Length", str(len(body)))
             conn.putheader("User-Agent", "CNKI-Sync")
             conn.endheaders()
-            print(f"[sync] 请求头已发送，开始流式上传 {fsize//1024//1024}MB ...")
+            print(f"[sync] 请求头已发送，开始流式上传 {fsize//1024//1024}MB ...", flush=True)
             # 分块发送，避免慢链路上单次 sendall 触发 socket 超时
             chunk = 1 << 20  # 1MB
             t0 = time.time()
@@ -149,15 +149,15 @@ def upload_asset(owner, repo, token, release_id, exe_path, max_retries=3):
                     sent_mb = i // (1024 * 1024)
                     speed = round(sent_mb / elapsed, 1) if elapsed > 0 else 0
                     print(f"[sync] 上传进度: {pct}% ({sent_mb}/{fsize//1024//1024}MB) "
-                          f"耗时 {elapsed}s  速度 ~{speed}MB/s")
-            print(f"[sync] 数据全部发送完毕，等待服务器响应 ...")
+                          f"耗时 {elapsed}s  速度 ~{speed}MB/s", flush=True)
+            print(f"[sync] 数据全部发送完毕，等待服务器响应 ...", flush=True)
             resp = conn.getresponse()
             result = json.loads(resp.read().decode("utf-8"))
-            print(f"[sync] 上传成功！服务器返回: {result.get('name', '?')}")
+            print(f"[sync] 上传成功！服务器返回: {result.get('name', '?')}", flush=True)
             return result
         except Exception as e:
             last_err = e
-            print(f"[sync] 上传第 {attempt}/{max_retries} 次失败: {e}")
+            print(f"[sync] 上传第 {attempt}/{max_retries} 次失败: {e}", flush=True)
         finally:
             if conn:
                 conn.close()
@@ -195,13 +195,13 @@ def main():
     if not os.path.exists(exe):
         raise SystemExit(f"未找到 exe: {exe}")
 
-    print(f"[sync] v{version}  owner={owner} repo={repo} exe={exe} ({os.path.getsize(exe)//1024//1024}MB)")
-    print(f"[sync] 步骤 1/2: 创建/复用 Gitee Release ...")
+    print(f"[sync] v{version}  owner={owner} repo={repo} exe={exe} ({os.path.getsize(exe)//1024//1024}MB)", flush=True)
+    print(f"[sync] 步骤 1/2: 创建/复用 Gitee Release ...", flush=True)
     rid = create_release(owner, repo, token, version, notes, branch)
-    print(f"[sync] Release id={rid}")
-    print(f"[sync] 步骤 2/2: 上传 exe 附件 ...")
+    print(f"[sync] Release id={rid}", flush=True)
+    print(f"[sync] 步骤 2/2: 上传 exe 附件 ...", flush=True)
     upload_asset(owner, repo, token, rid, exe)
-    print(f"[sync] ✅ 全部完成：exe 已同步到 Gitee Releases v{version}")
+    print(f"[sync] ✅ 全部完成：exe 已同步到 Gitee Releases v{version}", flush=True)
 
 
 if __name__ == "__main__":
