@@ -50,8 +50,12 @@ CNKI_HOME = "https://www.cnki.net"
 # ── 版本与更新检测（Gitee Releases）──
 # 发布流程：在 Gitee 仓库「发行版」页创建 Release（tag 如 v1.0.1），工具启动时比对最新 tag
 APP_VERSION = "1.0.0"
-GITEE_OWNER = "你的Gitee用户名"   # TODO: 改成你的 Gitee 用户名
-GITEE_REPO = "cnki-citation"      # TODO: 改成你的仓库名
+GITEE_OWNER = "sulele"           # Gitee 用户名（与 build_release.py / sync_gitee.py 保持一致）
+GITEE_REPO = "cnki-citation"      # Gitee 仓库名
+# 私有仓库必须带 token 才能访问 Releases API；公开仓库留空即可。
+# 注意：此 token 会被打包进 exe，任何人可反编译提取，故务必用「只读」令牌，
+# 且只授予本仓库，切勿用有写权限的令牌（发布用单独的写令牌，见 build_release.py）。
+GITEE_TOKEN = ""                  # TODO: 填一个「只读」个人令牌(PAT)，用于检测更新
 GITEE_API = f"https://gitee.com/api/v5/repos/{GITEE_OWNER}/{GITEE_REPO}/releases/latest"
 
 
@@ -72,8 +76,11 @@ def check_update() -> dict:
     if GITEE_OWNER in ("", "你的Gitee用户名"):
         return {"has_update": False, "skipped": True}
     try:
+        url = GITEE_API
+        if GITEE_TOKEN:
+            url += "?access_token=" + GITEE_TOKEN
         req = urllib.request.Request(
-            GITEE_API, headers={"User-Agent": "CNKI-Citation-Tool"})
+            url, headers={"User-Agent": "CNKI-Citation-Tool"})
         with urllib.request.urlopen(req, timeout=8) as resp:
             data = json.loads(resp.read().decode("utf-8"))
         latest = (data.get("tag_name") or data.get("name") or "").strip()
@@ -630,7 +637,14 @@ def load_excel(path: str, title_col: str, out_col: str):
     tasks: [(row_idx, title), ...]
     若 out_col 不存在则自动新建（追加列 + 写表头）
     """
-    wb = openpyxl.load_workbook(path)
+    try:
+        wb = openpyxl.load_workbook(path)
+    except Exception as e:
+        raise ValueError(
+            f"无法读取 Excel 文件「{Path(path).name}」：本工具用 openpyxl 直接解析 .xlsx，"
+            f"无需安装 Office。请确认：① 文件是 .xlsx 格式（旧版 .xls 不被支持，"
+            f"请用 Excel/WPS 另存为 .xlsx）；② 文件未损坏。\n底层错误：{e}"
+        )
     ws = wb.active
     t_idx = _resolve_col(ws, title_col)
     try:

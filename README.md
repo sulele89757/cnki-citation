@@ -104,7 +104,6 @@ mkdir -p dist && cp "$TMPO/CNKI引文工具.exe" dist/
 cnki_search/
 ├── cnki_citation.py   # 核心：搜索、反爬、引文提取、Excel 批量、更新检测
 ├── cnki_gui.py        # CustomTkinter 图形界面 + 系统托盘
-├── make_icon.py       # 生成 app.ico 图标
 ├── app.ico            # 程序图标
 ├── requirements.txt   # 依赖清单
 ├── README.md

@@ -1,0 +1,76 @@
+name: Build and Release
+
+# 触发：推送 tag（形如 v1.0.1）即自动构建并发布
+# 构建：GitHub 云端 windows-latest（无需本机常驻）
+# 发布：① 发到 GitHub Release ② 同步到 Gitee Release（国内用户从 Gitee 下载，稳、快）
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+# 允许工作流向 GitHub Release 写入
+permissions:
+  contents: write
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    runs-on: windows-latest
+    env:
+      GITEE_OWNER: sulele
+      GITEE_REPO: cnki-citation
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Compute version (strip leading v)
+        id: ver
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Bump APP_VERSION in source
+        # 让打出来的 exe 内置版本号 == tag，check_update 才能正确判断
+        run: |
+          python -c "import re;p='cnki_citation.py';s=open(p,encoding='utf-8').read();s=re.sub(r'(?m)^APP_VERSION = \".*\"', 'APP_VERSION = \"${{ steps.ver.outputs.version }}\"', s, count=1);open(p,'w',encoding='utf-8').write(s)"
+          echo "APP_VERSION -> ${{ steps.ver.outputs.version }}"
+
+      - name: Build exe (PyInstaller)
+        run: |
+          python -m PyInstaller --name "CNKI引文工具" --onefile --windowed --icon app.ico \
+            --hidden-import customtkinter --hidden-import playwright_stealth \
+            --hidden-import openpyxl --hidden-import pystray \
+            --collect-all playwright --collect-all playwright_stealth --collect-all pystray \
+            --add-data "批量引文模板.xlsx;." \
+            cnki_gui.py
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          name: ${{ github.ref_name }}
+          files: dist/CNKI引文工具.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Sync to Gitee Release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+          VERSION: ${{ steps.ver.outputs.version }}
+          EXE_PATH: dist/CNKI引文工具.exe
+          NOTES: ${{ github.event.head_commit.message }}
+          BRANCH: main
+        run: python sync_gitee.py

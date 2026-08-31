@@ -3,7 +3,10 @@ CNKI 论文引文获取工具 — GUI 版本（CustomTkinter，v4 设计师重�
 布局：左侧暗色导航 + 右侧内容区（单篇/批量/设置三视图）+ 底栏（进度+日志）
 依赖：customtkinter, playwright, playwright-stealth, openpyxl, pystray, Pillow
 """
+import os
 import re
+import sys
+import shutil
 import webbrowser
 import threading
 import asyncio
@@ -62,6 +65,7 @@ class CNKIGui:
         self._running = False
         self._tray_icon = None
         self._nav = {}
+        self._mode = "single"   # 当前任务模式：single / batch
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         self._build()
 
@@ -235,7 +239,36 @@ class CNKIGui:
         self.title_entry.pack(fill="x", padx=20, pady=(0, 18))
 
         self.single_btn = self._action_btn(inner, "获取引文", self._on_single)
-        self.single_btn.pack(fill="x", padx=20, pady=(0, 20))
+        self.single_btn.pack(fill="x", padx=20, pady=(0, 16))
+
+        # ── 结果区（直接显示在界面，支持一键复制）──
+        ctk.CTkLabel(inner, text="获取结果",
+                     font=ctk.CTkFont(size=12, weight="bold"),
+                     text_color=C["text"][m]).pack(
+            anchor="w", padx=20, pady=(0, 6))
+
+        result_card = ctk.CTkFrame(inner, fg_color=C["fill"][m],
+                                   border_color=C["border_light"][m], border_width=1,
+                                   corner_radius=10)
+        result_card.pack(fill="both", expand=True, padx=20, pady=(0, 12))
+
+        self.single_result = ctk.CTkTextbox(
+            result_card, height=120, font=ctk.CTkFont(size=13), wrap="word",
+            fg_color="transparent", border_width=0, corner_radius=8,
+            text_color=C["text"][m])
+        self.single_result.pack(fill="both", expand=True, padx=12, pady=12)
+        self.single_result.insert(
+            "0.0", "点击「获取引文」后，结果将显示在此处，可直接复制使用。")
+        self.single_result.configure(state="disabled")
+
+        self.single_copy_btn = ctk.CTkButton(
+            inner, text="一键复制", width=120, height=36,
+            command=self._copy_single,
+            fg_color=C["fill"][m], hover_color=C["border_light"][m],
+            text_color=C["text"][m],
+            font=ctk.CTkFont(size=12, weight="bold"),
+            corner_radius=8, state="disabled")
+        self.single_copy_btn.pack(anchor="e", padx=20, pady=(0, 16))
 
     # ── 批量视图 ──
     def _build_batch_view(self):
@@ -256,6 +289,23 @@ class CNKIGui:
                      font=ctk.CTkFont(size=12),
                      text_color=C["text_secondary"][m]).pack(
             anchor="w", padx=20, pady=(0, 18))
+
+        # 模板下载
+        tpl_row = ctk.CTkFrame(inner, fg_color="transparent")
+        tpl_row.pack(fill="x", padx=20, pady=(0, 14))
+        ctk.CTkButton(tpl_row, text="下载 Excel 模板", height=34, width=132,
+                      command=self._download_template,
+                      fg_color=C["fill"][m],
+                      hover_color=C["border_light"][m],
+                      text_color=C["primary"][m],
+                      border_color=C["border_light"][m], border_width=1,
+                      font=ctk.CTkFont(size=12, weight="bold"),
+                      corner_radius=8).pack(side="left")
+        ctk.CTkLabel(tpl_row,
+                     text="（含表头与一行示例：按「标题」列填论文，「引文」列留空）",
+                     font=ctk.CTkFont(size=11),
+                     text_color=C["text_muted"][m]).pack(
+            side="left", padx=(10, 0))
 
         ctk.CTkLabel(inner, text="Excel 文件",
                      font=ctk.CTkFont(size=12, weight="bold"),
@@ -420,10 +470,41 @@ class CNKIGui:
     #  交互逻辑
     # ════════════════════════════════════════════
     def _pick_excel(self):
-        path = filedialog.askopenfilename(filetypes=[("Excel 文件", "*.xlsx *.xls")])
+        path = filedialog.askopenfilename(filetypes=[("Excel 文件 (*.xlsx)", "*.xlsx")])
         if path:
             self.excel_entry.delete(0, "end")
             self.excel_entry.insert(0, path)
+
+    def _get_template_path(self):
+        name = "批量引文模板.xlsx"
+        if getattr(sys, "frozen", False):
+            return os.path.join(sys._MEIPASS, name)
+        return os.path.join(Path(__file__).resolve().parent, name)
+
+    def _download_template(self):
+        src = self._get_template_path()
+        if not os.path.exists(src):
+            messagebox.showerror("模板缺失", f"未找到内置模板文件：\n{src}")
+            return
+        dst = filedialog.asksaveasfilename(
+            title="保存 Excel 模板",
+            initialdir=str(core.OUTPUT_DIR),
+            initialfile="批量引文模板.xlsx",
+            defaultextension=".xlsx",
+            filetypes=[("Excel 文件 (*.xlsx)", "*.xlsx")])
+        if not dst:
+            return
+        try:
+            shutil.copyfile(src, dst)
+        except Exception as e:
+            messagebox.showerror("保存失败", f"模板保存失败：\n{e}")
+            return
+        self._log(f"[系统] Excel 模板已保存到：{dst}")
+        messagebox.showinfo("完成",
+            f"模板已保存：\n{dst}\n\n使用说明：\n"
+            f"• 「标题」列填写论文标题\n"
+            f"• 「引文」列留空，程序会自动回填\n"
+            f"• 完成后在上方「浏览」选择该文件即可批量处理")
 
     def _log(self, text):
         self.root.after(0, self._append_log, text)
@@ -482,9 +563,48 @@ class CNKIGui:
         self._set_running(False)
         self.status_label.configure(text="✓ 完成")
         self.progress.set(1)
-        if results:
+        if not results:
+            return
+        if getattr(self, "_mode", "single") == "single":
+            rec = results[0]
+            self.single_result.configure(state="normal")
+            self.single_result.delete("0.0", "end")
+            if rec.get("success") and rec.get("citation"):
+                self.single_result.insert("0.0", rec["citation"])
+                self.single_copy_btn.configure(state="normal")
+                self.status_label.configure(text="✓ 已获取")
+            else:
+                err = rec.get("error") or "未知错误"
+                self.single_result.insert(
+                    "0.0",
+                    f"✗ 获取失败：\n{err}\n\n可在下方运行日志查看详细过程，"
+                    f"或重试（必要时按提示在浏览器中完成验证）。")
+                self.single_copy_btn.configure(state="disabled")
+                self.status_label.configure(text="✗ 失败")
+            self.single_result.configure(state="disabled")
+        else:
             ok = sum(1 for r in results if r.get("success"))
             self._log(f"[系统] 处理完毕：成功 {ok}/{len(results)}")
+
+    def _copy_single(self):
+        """把单篇结果复制到剪贴板，并给出反馈"""
+        text = self.single_result.get("0.0", "end").strip()
+        if not text:
+            return
+        try:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(text)
+            self.root.update()
+        except Exception:
+            self._log("[提示] 复制失败，请手动选中文本复制")
+            return
+        C, m = self.C, self._mi
+        self.single_copy_btn.configure(text="✓ 已复制", fg_color=C["success"][m],
+                                       text_color="#ffffff")
+        self.root.after(
+            1500, lambda: self.single_copy_btn.configure(
+                text="一键复制", fg_color=C["fill"][m],
+                text_color=C["text"][m]))
 
     def _parse_gap(self):
         try:
@@ -501,6 +621,12 @@ class CNKIGui:
         gap = self._parse_gap()
         if not gap:
             return
+        self._mode = "single"
+        # 清空上次结果，禁用复制
+        self.single_result.configure(state="normal")
+        self.single_result.delete("0.0", "end")
+        self.single_result.configure(state="disabled")
+        self.single_copy_btn.configure(state="disabled")
         self._run_async(dict(
             titles=[title], connect=False, cdp="http://localhost:9222",
             human=self.human_var.get(), out_prefix="citations",
@@ -513,9 +639,16 @@ class CNKIGui:
         if not excel or not Path(excel).exists():
             messagebox.showwarning("提示", "请选择有效的 Excel 文件")
             return
+        if not excel.lower().endswith((".xlsx", ".xlsm")):
+            messagebox.showwarning(
+                "提示",
+                "仅支持 .xlsx 格式（.xls 旧格式不支持，请用 Excel/WPS 另存为 .xlsx）。\n"
+                "本工具无需安装 Office，使用 openpyxl 直接读取。")
+            return
         gap = self._parse_gap()
         if not gap:
             return
+        self._mode = "batch"
         self._run_async(dict(
             titles=[], connect=False, cdp="http://localhost:9222",
             human=self.human_var.get(), out_prefix="citations",

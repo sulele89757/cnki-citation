@@ -25,3 +25,8 @@ Thumbs.db
 
 # ── 代理 / 工具内部数据 ──
 .workbuddy/
+
+# ── 发布相关（含令牌，切勿提交）──
+.release_token
+.last_commit
+.release_notes.md
