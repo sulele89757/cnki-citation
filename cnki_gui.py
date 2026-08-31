@@ -1,6 +1,7 @@
 """
-CNKI 论文引文获取工具 — GUI 版本（CustomTkinter）
-依赖：customtkinter, playwright, playwright-stealth, openpyxl
+CNKI 论文引文获取工具 — GUI 版本（CustomTkinter，v4 设计师重构）
+布局：左侧暗色导航 + 右侧内容区（单篇/批量/设置三视图）+ 底栏（进度+日志）
+依赖：customtkinter, playwright, playwright-stealth, openpyxl, pystray, Pillow
 """
 import re
 import webbrowser
@@ -22,254 +23,402 @@ APP_VERSION = core.APP_VERSION
 class CNKIGui:
     def __init__(self):
         self.root = ctk.CTk()
-        self.root.title("CNKI 论文引文获取工具")
-        self.root.geometry("840x760")
-        self.root.minsize(740, 680)
+        self.root.title("CNKI 引文工具")
+        self.root.geometry("780x680")
+        self.root.minsize(680, 600)
 
         ctk.set_appearance_mode("system")
         ctk.set_default_color_theme("blue")
+        self._mi = 0 if ctk.get_appearance_mode() == "Light" else 1
 
-        # ── 自定义配色覆盖（让界面不灰）──
-        # 亮色模式：主色用更鲜亮的蓝；暗色模式保持深蓝
-        self._colors = {
-            # 主操作色（按钮/高亮）
-            "primary":        ("#2563eb", "#3b82f6"),       # 亮蓝 / 稍亮蓝
-            "primary_hover":  ("#1d4ed8", "#60a5fa"),
+        # ── 配色 Token（亮 / 暗）──
+        self.C = {
+            # 侧边栏（始终暗色，保证图标/文字对比）
+            "side_bg":        ("#1e2433", "#0d1117"),
+            "side_text":      ("#cbd5e1", "#cbd5e1"),
+            "side_sel":       ("#2b3447", "#161b22"),
+            "side_hover":     ("#283142", "#11161d"),
+            "side_accent":    ("#378ADD", "#388bfd"),
+            "side_muted":     ("#7c8798", "#6e7681"),
+            # 内容区
+            "bg":             ("#f0f2f5", "#0f1117"),
+            "card":           ("#ffffff", "#161b22"),
+            "border":         ("#d0d5dd", "#30363d"),
+            "border_light":   ("#e8ecf1", "#21262d"),
+            "primary":        ("#1677ff", "#388bfd"),
+            "primary_hover":  ("#0958d9", "#4da1ff"),
             "primary_text":   ("#ffffff", "#ffffff"),
-            # 卡片背景
-            "card_bg":        ("#ffffff", "#1e293b"),       # 白 / 深灰蓝
-            "card_border":    ("#e2e8f0", "#334155"),
-            # 输入框
-            "entry_bg":       ("#f8fafc", "#0f172a"),
-            "entry_border":   ("#cbd5e1", "#475569"),
-            "entry_fg":       ("#1e293b", "#e2e8f0"),
-            # 文字
-            "text":           ("#0f172a", "#f1f5f9"),
-            "text_secondary": ("#64748b", "#94a3b8"),
-            "text_muted":     ("#94a3b8", "#64748b"),
-            # 分段按钮
-            "seg_unsel":      ("#e2e8f0", "#334155"),
-            "seg_sel":        ("#2563eb", "#3b82f6"),
-            "seg_unsel_text": ("#475569", "#94a3b8"),
-            "seg_sel_text":   ("#ffffff", "#ffffff"),
-            # 进度条
-            "progress_bg":    ("#e2e8f0", "#334155"),
-            "progress_fg":    ("#2563eb", "#3b82f6"),
-            # 日志框
-            "log_bg":         ("#f1f5f9", "#0f172a"),
-            "log_text":       ("#334155", "#cbd5e1"),
-            # 提示文字
-            "hint_text":      ("#94a3b8", "#64748b"),
+            "text":           ("#1a1a2e", "#e6edf3"),
+            "text_secondary": ("#595959", "#8b949e"),
+            "text_muted":     ("#8c8c8c", "#6e7681"),
+            "fill":           ("#f5f6fa", "#1c2128"),
+            "fill_hover":     ("#ebedf0", "#262c36"),
+            "prog_track":     ("#d9d9d9", "#30363d"),
+            "prog_fill":      ("#1677ff", "#58a6ff"),
+            "success":        ("#52c41a", "#4ade80"),
+            "warning":        ("#faad14", "#fbbf24"),
         }
 
         self._running = False
         self._tray_icon = None
-        # 点 X 最小化到系统托盘，而非直接退出
+        self._nav = {}
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         self._build()
 
-    # ───────────────────────── UI 构建 ─────────────────────────
+    # ════════════════════════════════════════════
+    #  图标（PIL 线性图标，跨平台一致）
+    # ════════════════════════════════════════════
+    def _icon(self, kind, color=(203, 213, 225)):
+        s = 32
+        img = Image.new("RGBA", (s, s), (0, 0, 0, 0))
+        d = ImageDraw.Draw(img)
+        c = color
+        w = 2
+        if kind == "doc":
+            d.rounded_rectangle([9, 5, 23, 27], radius=3, outline=c, width=w)
+            for y in (11, 16, 21):
+                d.line([12, y, 20, y], fill=c, width=w)
+        elif kind == "grid":
+            for (x, y) in [(7, 7), (17, 7), (7, 17), (17, 17)]:
+                d.rectangle([x, y, x + 8, y + 8], outline=c, width=w)
+        elif kind == "sliders":
+            d.line([10, 11, 22, 11], fill=c, width=w)
+            d.ellipse([13, 9, 17, 13], fill=c)
+            d.line([10, 21, 22, 21], fill=c, width=w)
+            d.ellipse([13, 19, 17, 23], fill=c)
+        elif kind == "brand":
+            d.rounded_rectangle([6, 6, 26, 26], radius=7, fill=(22, 119, 255, 255))
+            d.line([12, 12, 12, 20], fill=(255, 255, 255), width=2)
+            d.line([12, 12, 17, 12], fill=(255, 255, 255), width=2)
+            d.line([20, 12, 20, 20], fill=(255, 255, 255), width=2)
+            d.line([20, 12, 25, 12], fill=(255, 255, 255), width=2)
+        return ctk.CTkImage(light_image=img, dark_image=img, size=(20, 20))
+
+    # ════════════════════════════════════════════
+    #  布局构建
+    # ════════════════════════════════════════════
     def _build(self):
-        # 顶部标题
-        header = ctk.CTkFrame(self.root, fg_color="transparent")
-        header.pack(fill="x", padx=22, pady=(20, 6))
-        left = ctk.CTkFrame(header, fg_color="transparent")
-        left.pack(side="left", fill="x", expand=True)
-        ctk.CTkLabel(left, text="CNKI 论文引文获取工具",
-                      font=ctk.CTkFont(size=23, weight="bold"),
-                      text_color=self._colors["text"][0]).pack(anchor="w")
-        ctk.CTkLabel(left, text="GB/T 7714-2025 格式引文 · 自动搜索 · 批量导出",
-                      font=ctk.CTkFont(size=12),
-                      text_color=self._colors["text_secondary"][0]).pack(anchor="w")
-        ctk.CTkButton(header, text="检查更新", width=92, height=32,
-                      fg_color=self._colors["primary"][0],
-                      hover_color=self._colors["primary_hover"][0],
-                      text_color="#ffffff",
-                      command=lambda: self._check_update(silent=False)).pack(
-            side="right", padx=(10, 0))
+        C = self.C
+        m = self._mi
+        root = self.root
+        root.configure(fg_color=C["bg"][m])
 
-        # 模式切换（选中态用主色高亮，未选中用浅灰）
-        self.mode = ctk.StringVar(value="single")
-        seg = ctk.CTkSegmentedButton(
-            self.root, values=["单篇", "批量(Excel)"],
-            variable=self.mode, command=self._on_mode_change,
-            font=ctk.CTkFont(size=13, weight="bold"),
-            unselected_color=self._colors["seg_unsel"][0],
-            selected_color=self._colors["seg_sel"][0],
-            unselected_hover_color=self._colors["card_border"][0],
-            selected_hover_color=self._colors["primary_hover"][0],
-            text_color=self._colors["seg_unsel_text"][0],
-            text_color_disabled=self._colors["text_muted"][0],
-            fg_color="transparent",
-            corner_radius=10, height=40)
-        # 暗色模式也需设置（CTkSegmentedButton 不自动跟随 mode 切换配色）
-        self._seg = seg
-        seg.pack(fill="x", padx=22, pady=(6, 4))
+        # ═══ 左侧导航 ═══
+        side = ctk.CTkFrame(root, width=200, fg_color=C["side_bg"][m],
+                            corner_radius=0)
+        side.pack(side="left", fill="y")
+        side.pack_propagate(False)
 
-        # 单篇区域
-        self.single_frame = ctk.CTkFrame(self.root, fg_color=self._colors["card_bg"][0],
-                                         border_color=self._colors["card_border"][0], border_width=1)
-        self.single_frame.pack(fill="x", padx=22, pady=8)
-        ctk.CTkLabel(self.single_frame, text="论文标题", font=ctk.CTkFont(weight="bold"),
-                      text_color=self._colors["text"][0]).pack(
-            anchor="w", padx=16, pady=(14, 4))
-        self.title_entry = ctk.CTkEntry(
-            self.single_frame, height=40,
-            placeholder_text="如：新形势下企业财务管理信息化建设的途径探索",
-            fg_color=self._colors["entry_bg"][0], border_color=self._colors["entry_border"][0],
-            text_color=self._colors["entry_fg"][0])
-        self.title_entry.pack(fill="x", padx=16, pady=(0, 12))
-        self.single_btn = self._make_big_button(
-            self.single_frame, "获取引文", self._on_single)
-        self.single_btn.pack(fill="x", padx=16, pady=(0, 16))
+        # 品牌
+        brand = ctk.CTkFrame(side, fg_color="transparent")
+        brand.pack(fill="x", padx=16, pady=(18, 8))
+        ctk.CTkLabel(brand, text="", image=self._icon("brand")).pack(
+            side="left", padx=(0, 10))
+        ctk.CTkLabel(brand, text="CNKI 引文",
+                     font=ctk.CTkFont(size=15, weight="bold"),
+                     text_color="#ffffff").pack(side="left")
 
-        # 批量区域
-        self.batch_frame = ctk.CTkFrame(self.root, fg_color=self._colors["card_bg"][0],
-                                        border_color=self._colors["card_border"][0], border_width=1)
-        ctk.CTkLabel(self.batch_frame, text="Excel 文件", font=ctk.CTkFont(weight="bold"),
-                      text_color=self._colors["text"][0]).pack(
-            anchor="w", padx=16, pady=(14, 4))
-        row1 = ctk.CTkFrame(self.batch_frame, fg_color="transparent")
-        row1.pack(fill="x", padx=16, pady=4)
-        self.excel_entry = ctk.CTkEntry(row1, height=38, placeholder_text="选择 .xlsx 文件",
-                                         fg_color=self._colors["entry_bg"][0],
-                                         border_color=self._colors["entry_border"][0],
-                                         text_color=self._colors["entry_fg"][0])
-        self.excel_entry.pack(side="left", fill="x", expand=True, padx=(0, 10))
-        ctk.CTkButton(row1, text="浏览", width=86, height=38, command=self._pick_excel,
-                      fg_color=self._colors["primary"][0], hover_color=self._colors["primary_hover"][0],
-                      text_color="#ffffff").pack(side="right")
+        ctk.CTkLabel(side, text="工作模式",
+                     font=ctk.CTkFont(size=10),
+                     text_color=C["side_muted"][m]).pack(
+            anchor="w", padx=18, pady=(14, 6))
 
-        row2 = ctk.CTkFrame(self.batch_frame, fg_color="transparent")
-        row2.pack(fill="x", padx=16, pady=4)
-        ctk.CTkLabel(row2, text="标题列", width=52, text_color=self._colors["text_secondary"][0]).pack(side="left")
-        self.title_col = ctk.CTkEntry(row2, height=34, width=96,
-                                       fg_color=self._colors["entry_bg"][0],
-                                       border_color=self._colors["entry_border"][0],
-                                       text_color=self._colors["entry_fg"][0])
-        self.title_col.insert(0, "标题")
-        self.title_col.pack(side="left", padx=6)
-        ctk.CTkLabel(row2, text="引文列", width=52, text_color=self._colors["text_secondary"][0]).pack(side="left", padx=(14, 0))
-        self.out_col = ctk.CTkEntry(row2, height=34, width=96,
-                                     fg_color=self._colors["entry_bg"][0],
-                                     border_color=self._colors["entry_border"][0],
-                                     text_color=self._colors["entry_fg"][0])
-        self.out_col.insert(0, "引文")
-        self.out_col.pack(side="left", padx=6)
+        # 导航项
+        for key, (label, icon) in {
+            "single": ("单篇抓取", "doc"),
+            "batch": ("批量处理", "grid"),
+            "settings": ("设置", "sliders"),
+        }.items():
+            btn = ctk.CTkButton(
+                side, text=label, image=self._icon(icon),
+                compound="left", anchor="w",
+                height=40, corner_radius=8,
+                fg_color="transparent", hover_color=C["side_hover"][m],
+                text_color=C["side_text"][m],
+                font=ctk.CTkFont(size=13),
+                command=lambda k=key: self._select_nav(k))
+            btn.pack(fill="x", padx=10, pady=3)
+            self._nav[key] = btn
 
-        note = ctk.CTkLabel(
-            self.batch_frame,
-            text="提示：引文列不存在时自动新建；已填行自动跳过（断点续传）；每条实时保存。",
-            font=ctk.CTkFont(size=11), text_color=self._colors["hint_text"][0])
-        note.pack(anchor="w", padx=16, pady=(4, 0))
-        self.batch_btn = self._make_big_button(
-            self.batch_frame, "开始批量处理", self._on_batch)
-        self.batch_btn.pack(fill="x", padx=16, pady=(12, 16))
+        # 底部版本号
+        ctk.CTkLabel(side, text=f"v{APP_VERSION}",
+                     font=ctk.CTkFont(size=10),
+                     text_color=C["side_muted"][m]).pack(
+            side="bottom", anchor="w", padx=18, pady=14)
 
-        # 选项区域
-        opt = ctk.CTkFrame(self.root, fg_color=self._colors["card_bg"][0],
-                           border_color=self._colors["card_border"][0], border_width=1)
-        opt.pack(fill="x", padx=22, pady=6)
-        self.human_var = ctk.BooleanVar(value=True)
-        ctk.CTkCheckBox(opt, text="拟人模式（推荐，规避机器人校验）",
-                        variable=self.human_var, font=ctk.CTkFont(size=12),
-                        text_color=self._colors["text"][0]).pack(
-            side="left", padx=16, pady=12)
-        gap = ctk.CTkFrame(opt, fg_color="transparent")
-        gap.pack(side="right", padx=16, pady=8)
-        ctk.CTkLabel(gap, text="搜索间隔(秒)", font=ctk.CTkFont(size=12),
-                     text_color=self._colors["text_secondary"][0]).pack(side="left")
-        self.min_gap = ctk.CTkEntry(gap, width=50, height=32,
-                                     fg_color=self._colors["entry_bg"][0],
-                                     border_color=self._colors["entry_border"][0],
-                                     text_color=self._colors["entry_fg"][0])
-        self.min_gap.insert(0, "5")
-        self.min_gap.pack(side="left", padx=5)
-        ctk.CTkLabel(gap, text="~", text_color=self._colors["text_secondary"][0]).pack(side="left")
-        self.max_gap = ctk.CTkEntry(gap, width=50, height=32,
-                                     fg_color=self._colors["entry_bg"][0],
-                                     border_color=self._colors["entry_border"][0],
-                                     text_color=self._colors["entry_fg"][0])
-        self.max_gap.insert(0, "12")
-        self.max_gap.pack(side="left", padx=5)
+        # ═══ 右侧内容区 ═══
+        content = ctk.CTkFrame(root, fg_color=C["bg"][m], corner_radius=0)
+        content.pack(side="left", fill="both", expand=True)
 
-        # 进度
-        prog = ctk.CTkFrame(self.root, fg_color="transparent")
-        prog.pack(fill="x", padx=22, pady=(6, 2))
-        self.progress = ctk.CTkProgressBar(prog, height=16,
-                                          progress_color=self._colors["progress_fg"][0],
-                                          bar_color=self._colors["progress_bg"][0])
+        # 视图容器（可切换）
+        self.view_area = ctk.CTkFrame(content, fg_color="transparent")
+        self.view_area.pack(fill="both", expand=True)
+
+        self._build_single_view()
+        self._build_batch_view()
+        self._build_settings_view()
+
+        # 底栏（进度 + 日志，常驻）
+        bottom = ctk.CTkFrame(content, fg_color="transparent")
+        bottom.pack(fill="x", side="bottom")
+
+        # 进度卡
+        prog_card = ctk.CTkFrame(bottom, fg_color=C["card"][m],
+                                 border_color=C["border"][m], border_width=1,
+                                 corner_radius=12)
+        prog_card.pack(fill="x", padx=20, pady=(0, 10))
+        prog_inner = ctk.CTkFrame(prog_card, fg_color="transparent")
+        prog_inner.pack(fill="x", padx=14, pady=10)
+        self.progress = ctk.CTkProgressBar(
+            prog_inner, height=8, corner_radius=4,
+            fg_color=C["prog_track"][m],
+            progress_color=C["prog_fill"][m])
         self.progress.pack(fill="x", side="left", expand=True, padx=(0, 12))
         self.progress.set(0)
-        self.status_label = ctk.CTkLabel(prog, text="就绪", width=72,
-                                         font=ctk.CTkFont(size=12, weight="bold"),
-                                         text_color=self._colors["text"][0])
+        self.status_label = ctk.CTkLabel(
+            prog_inner, text="● 就绪", width=80,
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color=C["primary"][m])
         self.status_label.pack(side="right")
 
         # 日志
-        ctk.CTkLabel(self.root, text="运行日志", font=ctk.CTkFont(weight="bold"),
-                      text_color=self._colors["text"][0]).pack(
-            anchor="w", padx=22, pady=(10, 2))
-        self.log_box = ctk.CTkTextbox(self.root, height=155, font=ctk.CTkFont(size=12), wrap="word",
-                                      fg_color=self._colors["log_bg"][0],
-                                      border_color=self._colors["card_border"][0],
-                                      text_color=self._colors["log_text"][0])
-        self.log_box.pack(fill="both", expand=True, padx=22, pady=(0, 8))
+        log_card = ctk.CTkFrame(bottom, fg_color=C["card"][m],
+                                border_color=C["border"][m], border_width=1,
+                                corner_radius=12)
+        log_card.pack(fill="x", padx=20, pady=(0, 16))
+        ctk.CTkLabel(log_card, text="运行日志",
+                     font=ctk.CTkFont(size=12, weight="bold"),
+                     text_color=C["text_secondary"][m]).pack(
+            anchor="w", padx=14, pady=(10, 4))
+        self.log_box = ctk.CTkTextbox(
+            log_card, height=110, font=ctk.CTkFont(size=12), wrap="word",
+            fg_color=C["fill"][m],
+            border_width=0, corner_radius=8,
+            text_color=C["text_secondary"][m])
+        self.log_box.pack(fill="x", padx=14, pady=(0, 12))
         self.log_box.configure(state="disabled")
 
-        # 结果
-        ctk.CTkLabel(self.root, text="最新引文（可复制）", font=ctk.CTkFont(weight="bold"),
-                      text_color=self._colors["text"][0]).pack(
-            anchor="w", padx=22, pady=(0, 2))
-        self.result_box = ctk.CTkTextbox(self.root, height=64, font=ctk.CTkFont(size=13),
-                                        fg_color=self._colors["log_bg"][0],
-                                        border_color=self._colors["card_border"][0],
-                                        text_color=self._colors["text"][0])
-        self.result_box.pack(fill="x", padx=22, pady=(0, 16))
+        self._select_nav("single")
 
-        self._on_mode_change(self.mode.get())
+    # ── 单篇视图 ──
+    def _build_single_view(self):
+        C, m = self.C, self._mi
+        v = ctk.CTkFrame(self.view_area, fg_color="transparent")
+        self.single_view = v
 
-    # ───────────────────────── 交互逻辑 ─────────────────────────
-    def _make_big_button(self, parent, text, command, height=52):
-        """自定义大按钮：CTkFrame + 居中标签，高度绝对可控（绕过 CTkButton height 渲染 bug）"""
-        c = self._colors
+        inner = ctk.CTkFrame(v, fg_color=C["card"][m],
+                             border_color=C["border"][m], border_width=1,
+                             corner_radius=14)
+        inner.pack(fill="both", expand=True, padx=20, pady=20)
+
+        ctk.CTkLabel(inner, text="单篇抓取",
+                     font=ctk.CTkFont(size=18, weight="bold"),
+                     text_color=C["text"][m]).pack(
+            anchor="w", padx=20, pady=(20, 2))
+        ctk.CTkLabel(inner, text="输入论文标题，自动获取 GB/T 7714-2025 格式引文",
+                     font=ctk.CTkFont(size=12),
+                     text_color=C["text_secondary"][m]).pack(
+            anchor="w", padx=20, pady=(0, 18))
+
+        ctk.CTkLabel(inner, text="论文标题",
+                     font=ctk.CTkFont(size=12, weight="bold"),
+                     text_color=C["text"][m]).pack(
+            anchor="w", padx=20, pady=(0, 6))
+        self.title_entry = ctk.CTkEntry(
+            inner, height=42,
+            placeholder_text="如：新形势下企业财务管理信息化建设的途径探索",
+            fg_color=C["fill"][m],
+            border_color=C["border_light"][m], border_width=1,
+            corner_radius=9,
+            text_color=C["text"][m],
+            font=ctk.CTkFont(size=13))
+        self.title_entry.pack(fill="x", padx=20, pady=(0, 18))
+
+        self.single_btn = self._action_btn(inner, "获取引文", self._on_single)
+        self.single_btn.pack(fill="x", padx=20, pady=(0, 20))
+
+    # ── 批量视图 ──
+    def _build_batch_view(self):
+        C, m = self.C, self._mi
+        v = ctk.CTkFrame(self.view_area, fg_color="transparent")
+        self.batch_view = v
+
+        inner = ctk.CTkFrame(v, fg_color=C["card"][m],
+                             border_color=C["border"][m], border_width=1,
+                             corner_radius=14)
+        inner.pack(fill="both", expand=True, padx=20, pady=20)
+
+        ctk.CTkLabel(inner, text="批量处理",
+                     font=ctk.CTkFont(size=18, weight="bold"),
+                     text_color=C["text"][m]).pack(
+            anchor="w", padx=20, pady=(20, 2))
+        ctk.CTkLabel(inner, text="选择 Excel 文件，按标题列批量获取并回填引文",
+                     font=ctk.CTkFont(size=12),
+                     text_color=C["text_secondary"][m]).pack(
+            anchor="w", padx=20, pady=(0, 18))
+
+        ctk.CTkLabel(inner, text="Excel 文件",
+                     font=ctk.CTkFont(size=12, weight="bold"),
+                     text_color=C["text"][m]).pack(
+            anchor="w", padx=20, pady=(0, 6))
+        file_row = ctk.CTkFrame(inner, fg_color="transparent")
+        file_row.pack(fill="x", padx=20, pady=(0, 14))
+        self.excel_entry = ctk.CTkEntry(
+            file_row, height=40,
+            placeholder_text="选择包含论文标题的 .xlsx 文件",
+            fg_color=C["fill"][m],
+            border_color=C["border_light"][m], border_width=1,
+            corner_radius=9,
+            text_color=C["text"][m],
+            font=ctk.CTkFont(size=13))
+        self.excel_entry.pack(side="left", fill="x", expand=True, padx=(0, 10))
+        ctk.CTkButton(file_row, text="浏览", width=72, height=40,
+                      command=self._pick_excel,
+                      fg_color=C["primary"][m],
+                      hover_color=C["primary_hover"][m],
+                      text_color="#fff",
+                      font=ctk.CTkFont(size=12, weight="bold"),
+                      corner_radius=9).pack(side="right")
+
+        col_row = ctk.CTkFrame(inner, fg_color="transparent")
+        col_row.pack(fill="x", padx=20, pady=(0, 12))
+        for lbl, attr, default in [("标题列", "title_col", "标题"),
+                                   ("引文列", "out_col", "引文")]:
+            ctk.CTkLabel(col_row, text=lbl, width=46,
+                         font=ctk.CTkFont(size=11),
+                         text_color=C["text_secondary"][m]).pack(side="left")
+            e = ctk.CTkEntry(col_row, height=32, width=90,
+                             fg_color=C["fill"][m],
+                             border_color=C["border_light"][m], border_width=1,
+                             corner_radius=7,
+                             text_color=C["text"][m],
+                             font=ctk.CTkFont(size=12))
+            e.insert(0, default)
+            e.pack(side="left", padx=6)
+            setattr(self, attr, e)
+            if lbl == "标题列":
+                ctk.CTkLabel(col_row, text="", width=12).pack(side="left")
+
+        ctk.CTkLabel(inner,
+                     text="引文列不存在时自动新建；已填行跳过；每条实时保存。",
+                     font=ctk.CTkFont(size=11),
+                     text_color=C["text_muted"][m]).pack(
+            anchor="w", padx=20, pady=(0, 14))
+
+        self.batch_btn = self._action_btn(inner, "开始批量处理", self._on_batch)
+        self.batch_btn.pack(fill="x", padx=20, pady=(0, 20))
+
+    # ── 设置视图 ──
+    def _build_settings_view(self):
+        C, m = self.C, self._mi
+        v = ctk.CTkFrame(self.view_area, fg_color="transparent")
+        self.settings_view = v
+
+        inner = ctk.CTkFrame(v, fg_color=C["card"][m],
+                             border_color=C["border"][m], border_width=1,
+                             corner_radius=14)
+        inner.pack(fill="both", expand=True, padx=20, pady=20)
+
+        ctk.CTkLabel(inner, text="设置",
+                     font=ctk.CTkFont(size=18, weight="bold"),
+                     text_color=C["text"][m]).pack(
+            anchor="w", padx=20, pady=(20, 14))
+
+        self.human_var = ctk.BooleanVar(value=True)
+        ctk.CTkCheckBox(inner, text="拟人模式（推荐，规避机器人校验）",
+                        variable=self.human_var,
+                        font=ctk.CTkFont(size=13),
+                        text_color=C["text"][m],
+                        checkbox_height=20, checkbox_width=20,
+                        corner_radius=5).pack(
+            anchor="w", padx=20, pady=(0, 16))
+
+        gap_row = ctk.CTkFrame(inner, fg_color="transparent")
+        gap_row.pack(anchor="w", padx=20, pady=(0, 16))
+        ctk.CTkLabel(gap_row, text="搜索间隔（秒）",
+                     font=ctk.CTkFont(size=13),
+                     text_color=C["text"][m]).pack(side="left")
+        for attr, w, d in [("min_gap", 50, "5"), ("max_gap", 50, "12")]:
+            e = ctk.CTkEntry(gap_row, height=32, width=w,
+                             fg_color=C["fill"][m],
+                             border_color=C["border_light"][m], border_width=1,
+                             corner_radius=7,
+                             text_color=C["text"][m],
+                             font=ctk.CTkFont(size=12))
+            e.insert(0, d)
+            e.pack(side="left", padx=6)
+            setattr(self, attr, e)
+            if attr == "min_gap":
+                ctk.CTkLabel(gap_row, text="~",
+                             text_color=C["text_secondary"][m]).pack(
+                    side="left", padx=2)
+
+        ctk.CTkButton(inner, text="检查更新",
+                      command=lambda: self._check_update(silent=False),
+                      fg_color=C["fill"][m],
+                      hover_color=C["border_light"][m],
+                      text_color=C["text"][m],
+                      font=ctk.CTkFont(size=12, weight="bold"),
+                      corner_radius=8, width=120, height=36).pack(
+            anchor="w", padx=20, pady=(0, 10))
+
+        ctk.CTkLabel(inner, text=f"当前版本 v{APP_VERSION}",
+                     font=ctk.CTkFont(size=11),
+                     text_color=C["text_muted"][m]).pack(
+            anchor="w", padx=20, pady=(0, 20))
+
+    # ════════════════════════════════════════════
+    #  导航切换
+    # ════════════════════════════════════════════
+    def _select_nav(self, key):
+        C, m = self.C, self._mi
+        for k, btn in self._nav.items():
+            if k == key:
+                btn.configure(fg_color=C["side_sel"][m],
+                              text_color="#ffffff")
+            else:
+                btn.configure(fg_color="transparent",
+                              text_color=C["side_text"][m])
+        for view in (self.single_view, self.batch_view, self.settings_view):
+            view.pack_forget()
+        getattr(self, f"{key}_view").pack(fill="both", expand=True)
+
+    # ════════════════════════════════════════════
+    #  组件工厂
+    # ════════════════════════════════════════════
+    def _action_btn(self, parent, text, command, height=46):
+        C, m = self.C, self._mi
         btn = ctk.CTkFrame(parent, height=height, corner_radius=10,
-                            fg_color=c["primary"], hover_color=c["primary_hover"],
-                            cursor="hand2")
+                           fg_color=C["primary"][m], cursor="hand2")
+        btn.pack_propagate(False)
         lbl = ctk.CTkLabel(btn, text=text,
-                             font=ctk.CTkFont(size=15, weight="bold"), text_color=c["primary_text"])
+                           font=ctk.CTkFont(size=14, weight="bold"),
+                           text_color=C["primary_text"][m])
         lbl.place(relx=0.5, rely=0.5, anchor="center")
 
-        def _on_click(e):
-            if btn.cget("state") != "disabled":
+        def _click(e):
+            if not getattr(btn, "_disabled", False):
                 command()
 
-        def _on_enter(e):
-            if btn.cget("state") != "disabled":
-                btn.configure(fg_color=c["primary_hover"])
+        def _enter(e):
+            if not getattr(btn, "_disabled", False):
+                btn.configure(fg_color=C["primary_hover"][m])
 
-        def _on_leave(e):
-            if btn.cget("state") != "disabled":
-                btn.configure(fg_color=c["primary"])
+        def _leave(e):
+            if not getattr(btn, "_disabled", False):
+                btn.configure(fg_color=C["primary"][m])
 
-        btn.bind("<Button-1>", _on_click)
-        btn.bind("<Enter>", _on_enter)
-        btn.bind("<Leave>", _on_leave)
-        lbl.bind("<Button-1>", _on_click)
-        # 存储 state 与颜色，供 _set_running 禁用/启用
-        btn._normal_fg = c["primary"]
-        btn._hover_fg = c["primary_hover"]
+        for w in (btn, lbl):
+            w.bind("<Button-1>", _click)
+        btn.bind("<Enter>", _enter)
+        btn.bind("<Leave>", _leave)
         btn._lbl = lbl
+        btn._disabled = False
         return btn
 
-    def _on_mode_change(self, mode):
-        if mode == "单篇":
-            self.single_frame.pack(fill="x", padx=22, pady=8)
-            self.batch_frame.pack_forget()
-        else:
-            self.single_frame.pack_forget()
-            self.batch_frame.pack(fill="x", padx=22, pady=8)
-
+    # ════════════════════════════════════════════
+    #  交互逻辑
+    # ════════════════════════════════════════════
     def _pick_excel(self):
         path = filedialog.askopenfilename(filetypes=[("Excel 文件", "*.xlsx *.xls")])
         if path:
@@ -285,36 +434,37 @@ class CNKIGui:
         self.log_box.see("end")
         self.log_box.configure(state="disabled")
 
-        m = re.search(r"第 (\d+)/(\d+) 篇", text)
-        if m:
-            i, n = int(m.group(1)), int(m.group(2))
+        mt = re.search(r"第 (\d+)/(\d+) 篇", text)
+        if mt:
+            i, n = int(mt.group(1)), int(mt.group(2))
             self.progress.set(i / n if n else 0)
             self.status_label.configure(text=f"{i}/{n}")
-
-        # 提取成功行 → 结果框
         if "[✓ 成功]" in text:
             citation = text.split("]", 1)[-1].strip()
-            self.result_box.delete("0.0", "end")
-            self.result_box.insert("0.0", citation)
+            self.log_box.configure(state="normal")
+            self.log_box.insert("end", "\n" + "─" * 38 + "\n")
+            self.log_box.insert("end", f"★ 最新引文：\n{citation}\n")
+            self.log_box.see("end")
+            self.log_box.configure(state="disabled")
 
     def _set_running(self, running):
         self._running = running
-        c = self._colors
-        disabled = ("#9ca3af", "#6b7280")  # 灰色
-        normal = c["primary"]               # 蓝色
-        color = disabled if running else normal
+        C, m = self.C, self._mi
+        color = C["border"][m] if running else C["primary"][m]
+        txt = C["text_muted"][m] if running else "#ffffff"
         for btn in (self.single_btn, self.batch_btn):
-            btn.configure(fg_color=color, cursor="arrow" if running else "hand2")
-            btn._lbl.configure(text_color="#ffffff" if running else c["primary_text"])
-        self.status_label.configure(text="运行中" if running else "就绪",
-                                   text_color=c["text"][0])
+            btn._disabled = running
+            btn.configure(fg_color=color)
+            btn._lbl.configure(text_color=txt)
+        self.status_label.configure(
+            text="▶ 运行中..." if running else "● 就绪",
+            text_color=C["warning"][m] if running else C["primary"][m])
 
     def _run_async(self, coro_args: dict):
         if self._running:
             return
         self._set_running(True)
         self.progress.set(0)
-        self.result_box.delete("0.0", "end")
         self._log("[系统] 任务启动，正在打开浏览器（首次可能需手动通过验证码）...")
 
         def worker():
@@ -330,7 +480,7 @@ class CNKIGui:
 
     def _on_done(self, results):
         self._set_running(False)
-        self.status_label.configure(text="完成")
+        self.status_label.configure(text="✓ 完成")
         self.progress.set(1)
         if results:
             ok = sum(1 for r in results if r.get("success"))
@@ -392,7 +542,7 @@ class CNKIGui:
             self._log(f"[更新] 检测失败：{res['error']}")
             return
         if res.get("has_update"):
-            self.status_label.configure(text="有新版本")
+            self.status_label.configure(text="↻ 有新版本")
             self._log(f"[更新] 发现新版本 {res.get('latest')}！发布页：{res.get('url')}")
             ans = messagebox.askyesno(
                 "发现新版本",
@@ -405,23 +555,23 @@ class CNKIGui:
                 messagebox.showinfo("检查更新", f"已是最新版本 v{APP_VERSION}")
             self._log("[更新] 已是最新版本")
 
-    # ───────────────────────── 系统托盘 ─────────────────────────
+    # ════════════════════════════════════════════
+    #  系统托盘
+    # ════════════════════════════════════════════
     @staticmethod
     def _make_tray_icon() -> Image.Image:
-        """代码生成的托盘图标（蓝色圆角方块 + 引号），不依赖外部文件"""
         s = 64
         img = Image.new("RGBA", (s, s), (0, 0, 0, 0))
         d = ImageDraw.Draw(img)
-        d.rounded_rectangle([10, 10, 54, 54], radius=14, fill=(37, 99, 235, 255))
+        d.rounded_rectangle([8, 8, 56, 56], radius=16, fill=(22, 119, 255, 255))
         w = (255, 255, 255, 255)
-        d.line([26, 30, 26, 40], fill=w, width=5)
-        d.line([26, 30, 34, 30], fill=w, width=5)
-        d.line([40, 30, 40, 40], fill=w, width=5)
-        d.line([40, 30, 48, 30], fill=w, width=5)
+        d.line([24, 24, 24, 40], fill=w, width=5)
+        d.line([24, 24, 34, 24], fill=w, width=5)
+        d.line([40, 24, 40, 40], fill=w, width=5)
+        d.line([40, 24, 50, 24], fill=w, width=5)
         return img
 
     def _on_close(self):
-        """点 X：隐藏到托盘（不退出进程），任务进行中时也允许最小化"""
         self.root.withdraw()
         self._show_tray()
 
@@ -450,7 +600,7 @@ class CNKIGui:
         self.root.after(0, self.root.destroy)
 
     def run(self):
-        self.root.after(2000, lambda: self._check_update(silent=True))
+        self.root.after(2500, lambda: self._check_update(silent=True))
         self.root.mainloop()
 
 
