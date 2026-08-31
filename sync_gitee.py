@@ -95,6 +95,18 @@ def upload_asset(owner, repo, token, release_id, exe_path):
 
 
 def main():
+    # Windows CI 控制台默认编码可能不支持中文，强制 UTF-8
+    if sys.stdout and hasattr(sys.stdout, "reconfigure"):
+        try:
+            sys.stdout.reconfigure(encoding="utf-8")
+        except Exception:
+            pass
+    if sys.stderr and hasattr(sys.stderr, "reconfigure"):
+        try:
+            sys.stderr.reconfigure(encoding="utf-8")
+        except Exception:
+            pass
+
     owner = os.environ.get("GITEE_OWNER", "").strip()
     repo = os.environ.get("GITEE_REPO", "").strip()
     token = os.environ.get("GITEE_TOKEN", "").strip()
