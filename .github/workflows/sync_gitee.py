@@ -18,8 +18,11 @@ Gitee 附件单文件上限 100MB（本 exe ~57MB 安全）。
 import json
 import os
 import sys
+import time
+import http.client
 import urllib.request
 import urllib.error
+import urllib.parse
 import uuid
 
 
@@ -64,34 +67,88 @@ def create_release(owner, repo, token, version, notes, branch):
         raise
 
 
-def upload_asset(owner, repo, token, release_id, exe_path):
-    """multipart 上传 exe 到指定 Release"""
+def _list_assets(owner, repo, token, release_id):
+    """列出 Release 已有附件，返回 [(name, size), ...]；失败返回空列表（不阻断上传）"""
+    url = (f"https://gitee.com/api/v5/repos/{owner}/{repo}"
+           f"/releases/{release_id}/attach_files?access_token={token}")
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "CNKI-Sync"})
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        out = []
+        for it in data if isinstance(data, list) else []:
+            n = it.get("name") or it.get("title") or it.get("filename")
+            s = it.get("size") or it.get("bytes") or it.get("byte_size")
+            if n and s is not None:
+                out.append((str(n), int(s)))
+        return out
+    except Exception as e:
+        print(f"[sync] 检查已有附件失败（忽略，继续上传）: {e}")
+        return []
+
+
+def upload_asset(owner, repo, token, release_id, exe_path, max_retries=3):
+    """multipart 分块流式上传 exe 到指定 Release。
+    - 已存在同名同大小附件则跳过（重跑不重复）
+    - 分 1MB 块发送，超时 600s，整体慢链路上也不会因单次 sendall 超时
+    - 失败自动重试（指数退避）
+    """
+    fn = os.path.basename(exe_path)
+    fsize = os.path.getsize(exe_path)
+
+    # 去重：同名同大小已存在则跳过
+    try:
+        for n, s in _list_assets(owner, repo, token, release_id):
+            if n == fn and s == fsize:
+                print(f"[sync] 已存在同名同大小附件 {fn}（{fsize//1024//1024}MB），跳过上传")
+                return {"skipped": True, "name": fn}
+    except Exception:
+        pass
+
     url = (f"https://gitee.com/api/v5/repos/{owner}/{repo}"
            f"/releases/{release_id}/attach_files?access_token={token}")
     with open(exe_path, "rb") as f:
         file_bytes = f.read()
     boundary = "----CNKIBoundary" + uuid.uuid4().hex
-    parts = []
-    parts.append(("--" + boundary).encode())
-    parts.append(b'\r\nContent-Disposition: form-data; name="access_token"\r\n\r\n')
-    parts.append(token.encode())
-    parts.append(b"\r\n")
-    parts.append(("--" + boundary).encode())
-    fn = os.path.basename(exe_path)
-    parts.append(f'\r\nContent-Disposition: form-data; name="file"; filename="{fn}"'.encode())
-    parts.append(b"\r\nContent-Type: application/octet-stream\r\n\r\n")
-    parts.append(file_bytes)
-    parts.append(b"\r\n")
-    parts.append(("--" + boundary + "--").encode())
-    parts.append(b"\r\n")
-    body = b"".join(parts)
-    req = urllib.request.Request(
-        url, data=body,
-        headers={"Content-Type": f"multipart/form-data; boundary={boundary}",
-                 "User-Agent": "CNKI-Sync"},
-        method="POST")
-    with urllib.request.urlopen(req, timeout=120) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+    head = (
+        f"--{boundary}\r\n"
+        f'Content-Disposition: form-data; name="access_token"\r\n\r\n'
+        f"{token}\r\n"
+        f"--{boundary}\r\n"
+        f'Content-Disposition: form-data; name="file"; filename="{fn}"\r\n'
+        f"Content-Type: application/octet-stream\r\n\r\n"
+    ).encode("utf-8")
+    tail = f"\r\n--{boundary}--\r\n".encode("utf-8")
+    body = head + file_bytes + tail
+
+    parsed = urllib.parse.urlparse(url)
+    last_err = None
+    for attempt in range(1, max_retries + 1):
+        conn = None
+        try:
+            conn = http.client.HTTPSConnection(
+                parsed.hostname, parsed.port or 443, timeout=600)
+            conn.connect()
+            conn.putrequest("POST", parsed.path + ("?" + parsed.query if parsed.query else ""))
+            conn.putheader("Content-Type", f"multipart/form-data; boundary={boundary}")
+            conn.putheader("Content-Length", str(len(body)))
+            conn.putheader("User-Agent", "CNKI-Sync")
+            conn.endheaders()
+            # 分块发送，避免慢链路上单次 sendall 触发 socket 超时
+            chunk = 1 << 20  # 1MB
+            for i in range(0, len(body), chunk):
+                conn.send(body[i:i + chunk])
+            resp = conn.getresponse()
+            return json.loads(resp.read().decode("utf-8"))
+        except Exception as e:
+            last_err = e
+            print(f"[sync] 上传第 {attempt}/{max_retries} 次失败: {e}")
+        finally:
+            if conn:
+                conn.close()
+        if attempt < max_retries:
+            time.sleep(5 * attempt)  # 5s, 10s 退避
+    raise RuntimeError(f"上传 exe 失败（已重试 {max_retries} 次）: {last_err}")
 
 
 def main():

@@ -50,7 +50,7 @@ CNKI_HOME = "https://www.cnki.net"
 # ── 版本与更新检测（Gitee Releases）──
 # 发布流程：在 Gitee 仓库「发行版」页创建 Release（tag 如 v1.0.1），工具启动时比对最新 tag
 APP_VERSION = "1.0.0"
-GITEE_OWNER = "sulele"           # Gitee 用户名（与 build_release.py / sync_gitee.py 保持一致）
+GITEE_OWNER = "sulele"           # Gitee 用户名（与 build_release.py / .github/workflows/sync_gitee.py 保持一致）
 GITEE_REPO = "cnki-citation"      # Gitee 仓库名
 # 私有仓库必须带 token 才能访问 Releases API；公开仓库留空即可。
 # 注意：此 token 会被打包进 exe，任何人可反编译提取，故务必用「只读」令牌，

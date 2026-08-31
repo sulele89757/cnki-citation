@@ -74,4 +74,4 @@ jobs:
           EXE_PATH: dist/CNKI引文工具.exe
           NOTES: ${{ github.event.head_commit.message }}
           BRANCH: main
-        run: python sync_gitee.py
+        run: python .github/workflows/sync_gitee.py
