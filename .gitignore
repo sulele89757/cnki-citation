@@ -30,6 +30,7 @@ Thumbs.db
 .release_token
 .last_commit
 .release_notes.md
+build_release.py
 
 # ── 临时预览 / 散落文件 ──
 _*.png
