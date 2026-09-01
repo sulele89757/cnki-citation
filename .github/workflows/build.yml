@@ -48,12 +48,16 @@ jobs:
           echo "APP_VERSION -> ${{ steps.ver.outputs.version }}"
 
       - name: Build exe (PyInstaller)
+        # 资源文件都在 assets/ 子目录；运行时代码从 sys._MEIPASS/assets 读取，
+        # 故 --add-data 的源路径与目标目录都必须带 assets/ 前缀。
         run: |
-          python -m PyInstaller --name "CNKI引文工具" --onefile --windowed --icon app.ico \
+          python -m PyInstaller --name "CNKI引文工具" --onefile --windowed --icon assets/app.ico \
             --hidden-import customtkinter --hidden-import playwright_stealth \
             --hidden-import openpyxl --hidden-import pystray \
             --collect-all playwright --collect-all playwright_stealth --collect-all pystray \
-            --add-data "批量引文模板.xlsx;." \
+            --add-data "assets/批量引文模板.xlsx;assets" \
+            --add-data "assets/cnki_icon.png;assets" \
+            --add-data "assets/cnki_icon_dark.png;assets" \
             cnki_gui.py
 
       - name: Upload to GitHub Release
