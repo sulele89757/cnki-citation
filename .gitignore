@@ -30,3 +30,8 @@ Thumbs.db
 .release_token
 .last_commit
 .release_notes.md
+
+# ── 临时预览 / 散落文件 ──
+_*.png
+favicon.ico
+auto_build.py

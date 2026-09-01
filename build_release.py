@@ -34,7 +34,7 @@ import uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 EXE_NAME = "CNKI引文工具"
-APP_ICON = os.path.join(HERE, "app.ico")
+APP_ICON = os.path.join(HERE, "assets", "app.ico")
 MAIN_SCRIPT = os.path.join(HERE, "cnki_gui.py")
 
 # ── Gitee 仓库信息（与 cnki_citation.py 保持一致）──
@@ -146,7 +146,9 @@ def _build_exe():
         "--collect-all", "playwright",
         "--collect-all", "playwright_stealth",
         "--collect-all", "pystray",
-        "--add-data", f"{os.path.join(HERE, '批量引文模板.xlsx')};.",
+        "--add-data", f"{os.path.join(HERE, 'assets', '批量引文模板.xlsx')};assets",
+        "--add-data", f"{os.path.join(HERE, 'assets', 'cnki_icon.png')};assets",
+        "--add-data", f"{os.path.join(HERE, 'assets', 'cnki_icon_dark.png')};assets",
         MAIN_SCRIPT,
     ]
     print(f"[构建] 运行 PyInstaller（解释器: {PYINSTALLER_PYTHON}）...")

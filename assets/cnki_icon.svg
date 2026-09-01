@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="知网引文图标">
+  <title>知网引文</title>
+  <!-- 透明背景：仅橙色描边圆角边框 + 内部黑色手写体「知」，圆角外完全透明，可融入任务栏 -->
+  <!-- 边框色取自 CNKI 官方 favicon (kns.cnki.net) 真实品牌色 #FF873F -->
+  <!-- 橙色描边圆角框：占画布 88%（四周约 6% 边距），圆角半径 ≈ 画布 22%，仅描边不填充 -->
+  <rect x="31" y="31" width="450" height="450" rx="113" ry="113"
+        fill="none" stroke="#FF873F" stroke-width="38"/>
+  <!-- 内部黑色手写体「知」（华文行楷）：水平居中，垂直居中落在画布高度 50% 处 -->
+  <text x="256" y="256"
+        font-family="'STXingkai','华文行楷','KaiTi','楷体','STKaiti','SimKai',serif"
+        font-size="300" fill="#000000"
+        text-anchor="middle" dominant-baseline="central">知</text>
+</svg>

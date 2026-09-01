@@ -8,6 +8,7 @@ import re
 import sys
 import shutil
 import tempfile
+import time
 import urllib.request
 import webbrowser
 import threading
@@ -25,41 +26,60 @@ import cnki_citation as core
 APP_VERSION = core.APP_VERSION
 
 
-# ── 单例锁：防止启动多个实例（Windows Mutex）──
+# ── 单例锁：防止启动多个实例（Windows Mutex via ctypes，零依赖）──
 def _check_singleton():
-    """若已有实例在运行，弹出提示并退出。返回 True 表示可继续。"""
-    try:
-        import win32event
-        import win32api
-        import winerror
-        _SINGLETON_MUTEX_NAME = "CNKI_Citation_Tool_Singleton_Mutex"
-        handle = win32event.CreateMutex(None, False, _SINGLETON_MUTEX_NAME)
-        if win32api.GetLastError() == winerror.ERROR_ALREADY_EXISTS:
-            # 已有实例：尝试激活其窗口后退出
-            try:
-                import win32gui
-                hwnd = win32gui.FindWindow(None, "CNKI 引文工具")
-                if hwnd:
-                    if win32gui.IsIconic(hwnd):
-                        win32gui.ShowWindow(hwnd, 9)  # SW_RESTORE
-                    win32gui.SetForegroundWindow(hwnd)
-            except Exception:
-                pass
-            # 用 tkinter 弹提示（此时 root 尚未创建，用简易弹窗）
-            import tkinter as tk
-            r = tk.Tk()
-            r.withdraw()
-            r.after(100, lambda: (
-                messagebox.showinfo("提示", "CNKI 引文工具已在运行中。\n"
-                                     "请查看系统托盘或任务栏中的窗口。"),
-                r.destroy()
-            ))
-            r.mainloop()
-            return False
-        return True
-    except ImportError:
-        # pywin32 不可用时（开发环境可能缺），跳过单例检查
-        return True
+    """若已有实例在运行，激活其窗口后退出。返回 True 表示可继续。
+
+    用 ctypes 直接调 Win32 API，不依赖 pywin32（打包环境无 pywin32 也能工作）。
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.windll.kernel32
+    user32 = ctypes.windll.user32
+
+    # CreateMutexW 签名
+    kernel32.CreateMutexW.argtypes = [wintypes.LPCVOID, wintypes.BOOL, wintypes.LPCWSTR]
+    kernel32.CreateMutexW.restype = wintypes.HANDLE
+    kernel32.GetLastError.argtypes = []
+    kernel32.GetLastError.restype = wintypes.DWORD
+
+    user32.FindWindowW.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR]
+    user32.FindWindowW.restype = wintypes.HWND
+    user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+    user32.ShowWindow.restype = wintypes.BOOL
+    user32.SetForegroundWindow.argtypes = [wintypes.HWND]
+    user32.SetForegroundWindow.restype = wintypes.BOOL
+    user32.IsIconic.argtypes = [wintypes.HWND]
+    user32.IsIconic.restype = wintypes.BOOL
+
+    _SINGLETON_MUTEX_NAME = "CNKI_Citation_Tool_Singleton_Mutex"
+    ERROR_ALREADY_EXISTS = 183
+
+    # 创建命名 Mutex（同名 Mutex 全局唯一，第二个进程 GetLastError == 183）
+    handle = kernel32.CreateMutexW(None, False, _SINGLETON_MUTEX_NAME)
+    if handle == 0 or kernel32.GetLastError() == ERROR_ALREADY_EXISTS:
+        # 已有实例在运行：激活其窗口
+        try:
+            hwnd = user32.FindWindowW(None, "CNKI 引文工具")
+            if hwnd:
+                if user32.IsIconic(hwnd):
+                    user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+                user32.SetForegroundWindow(hwnd)
+        except Exception:
+            pass
+        # 弹提示
+        import tkinter as tk
+        r = tk.Tk()
+        r.withdraw()
+        r.after(100, lambda: (
+            messagebox.showinfo("提示", "CNKI 引文工具已在运行中。\n"
+                                 "请查看系统托盘或任务栏中的窗口。"),
+            r.destroy()
+        ))
+        r.mainloop()
+        return False
+    return True
 
 
 class CNKIGui:
@@ -71,7 +91,7 @@ class CNKIGui:
 
         ctk.set_appearance_mode("system")
         ctk.set_default_color_theme("blue")
-        self._mi = 0 if ctk.get_appearance_mode() == "Light" else 1
+        self._mi = 1 if CNKIGui._system_is_dark() else 0
 
         # ── 配色 Token（亮 / 暗）──
         self.C = {
@@ -108,9 +128,117 @@ class CNKIGui:
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         self._build()
 
+        # 设置窗口图标（必须在 _build / set_theme 之后，否则 CTk 会覆盖）
+        # 关键：用 iconbitmap() 而非 iconphoto()——前者是 Windows 原生级别，
+        # CTk 不会覆盖；后者是 CTk 管理的 PhotoImage 对象，会被反复重置。
+        self._current_icon_mode = self._mi
+        self._set_window_icon(self._mi)
+
     # ════════════════════════════════════════════
-    #  图标（PIL 线性图标，跨平台一致）
+    #  图标（亮/暗双版本，跟随系统主题自动切换）
     # ════════════════════════════════════════════
+    _ICON_NAMES = {0: "cnki_icon.png", 1: "cnki_icon_dark.png"}  # 0=Light, 1=Dark
+
+    @staticmethod
+    def _system_is_dark():
+        """读取系统「实际」明暗模式。
+
+        优先读 Windows 注册表 AppsUseLightTheme（最可靠，不依赖第三方库），
+        失败回退 darkdetect。所有检测失败时默认返回 False（亮色）。
+        诊断信息同时写入 %TEMP%/cnki_theme_debug.log（exe 是 windowed，
+        用户看不到 print 输出）。
+        """
+        log_path = os.path.join(tempfile.gettempdir(), "cnki_theme_debug.log")
+        def _log(msg):
+            try:
+                with open(log_path, "a", encoding="gbk") as f:
+                    f.write(f"[{time.strftime('%H:%M:%S')}] {msg}\n")
+            except Exception:
+                pass
+            print(msg)
+
+        _log("=== 主题检测 ===")
+
+        # 方案 1（优先）：直接读 Windows 注册表，最可靠
+        try:
+            import winreg
+            key = winreg.OpenKey(
+                winreg.HKEY_CURRENT_USER,
+                r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize")
+            val, _ = winreg.QueryValueEx(key, "AppsUseLightTheme")
+            is_dark = (val == 0)  # 0 = 暗色, 1 = 亮色
+            _log(f"[注册表] AppsUseLightTheme = {val} → {'暗色' if is_dark else '亮色'}")
+            return is_dark
+        except Exception as e:
+            _log(f"[注册表] 读取失败: {e}")
+
+        # 方案 2（兜底）：darkdetect
+        try:
+            import darkdetect
+            theme = darkdetect.theme()
+            is_dark = (theme == "Dark")
+            _log(f"[darkdetect] theme = {theme} → {'暗色' if is_dark else '亮色'}")
+            return is_dark
+        except Exception as e:
+            _log(f"[darkdetect] 不可用: {e}")
+
+        # 最终兜底：亮色
+        _log("[兜底] 所有方案失败，默认亮色")
+        return False
+
+    @staticmethod
+    def _icon_path(name):
+        """定位内置图标 PNG：开发环境取 assets 子目录，打包后取 _MEIPASS/assets。"""
+        if getattr(sys, "frozen", False):
+            return os.path.join(sys._MEIPASS, "assets", name)
+        return str(Path(__file__).resolve().parent / "assets" / name)
+
+    @staticmethod
+    def _load_icon_image(mode):
+        """加载指定模式的图标 PNG 为 PIL Image（带缓存，避免重复读盘）。
+        mode: 0 = Light, 1 = Dark。"""
+        cache_key = f"_ICON_IMG_CACHE_{mode}"
+        if not hasattr(CNKIGui, cache_key):
+            name = CNKIGui._ICON_NAMES.get(mode, "cnki_icon.png")
+            setattr(CNKIGui, cache_key,
+                    Image.open(CNKIGui._icon_path(name)).convert("RGBA"))
+        return getattr(CNKIGui, cache_key)
+
+    @staticmethod
+    def _resize_icon(size, mode=None):
+        """把设计图标缩放到指定边长，返回新 PIL Image（LANCZOS 抗锯齿）。
+        mode: 0=Light / 1=Dark；None 则用当前系统模式。"""
+        if mode is None:
+            mode = 1 if CNKIGui._system_is_dark() else 0
+        base = CNKIGui._load_icon_image(mode)
+        return base.resize((size, size), Image.LANCZOS)
+
+    def _set_window_icon(self, mode):
+        """用 root.iconbitmap() 设置窗口图标（标题栏 + 任务栏 + Alt+Tab）。
+
+        关键发现（参考 aws-cloudfront-monitor 项目）：
+        - iconbitmap(.ico文件路径) → Windows 原生级别，CTk 不会覆盖
+        - iconphoto(PhotoImage) → CTk 管理的对象，会被反复重置
+        因此必须用 iconbitmap()，且必须在 _build / set_theme 之后调用。
+        """
+        import tempfile
+        icon_name = CNKIGui._ICON_NAMES.get(mode, "cnki_icon.png")
+        png_path = CNKIGui._icon_path(icon_name)
+
+        # iconbitmap() 需要 .ico 文件，从 PNG 生成多尺寸 ICO。
+        # 关键：必须含 24x24（任务栏按钮尺寸）+ 16/32/48/64/128/256，
+        # 否则 Windows 选不到精确尺寸会强行缩放 → 马赛克。
+        try:
+            img = Image.open(png_path).convert('RGBA')
+            sizes = [(16, 16), (24, 24), (32, 32), (48, 48),
+                     (64, 64), (128, 128), (256, 256)]
+            tmp_ico = os.path.join(tempfile.gettempdir(), f'cnki_icon_mode{mode}.ico')
+            img.save(tmp_ico, format='ICO', sizes=sizes)
+            self.root.iconbitmap(tmp_ico)
+            print(f"[图标] iconbitmap 已设置: {icon_name} (含24x24等7尺寸)")
+        except Exception as e:
+            print(f"[图标] iconbitmap 设置失败: {e}")
+
     def _icon(self, kind, color=(203, 213, 225)):
         s = 32
         img = Image.new("RGBA", (s, s), (0, 0, 0, 0))
@@ -130,11 +258,7 @@ class CNKIGui:
             d.line([10, 21, 22, 21], fill=c, width=w)
             d.ellipse([13, 19, 17, 23], fill=c)
         elif kind == "brand":
-            d.rounded_rectangle([6, 6, 26, 26], radius=7, fill=(22, 119, 255, 255))
-            d.line([12, 12, 12, 20], fill=(255, 255, 255), width=2)
-            d.line([12, 12, 17, 12], fill=(255, 255, 255), width=2)
-            d.line([20, 12, 20, 20], fill=(255, 255, 255), width=2)
-            d.line([20, 12, 25, 12], fill=(255, 255, 255), width=2)
+            img = self._resize_icon(32)
         return ctk.CTkImage(light_image=img, dark_image=img, size=(20, 20))
 
     # ════════════════════════════════════════════
@@ -152,14 +276,12 @@ class CNKIGui:
         side.pack(side="left", fill="y")
         side.pack_propagate(False)
 
-        # 品牌
+        # 品牌（纯文字，无图标）
         brand = ctk.CTkFrame(side, fg_color="transparent")
         brand.pack(fill="x", padx=16, pady=(18, 8))
-        ctk.CTkLabel(brand, text="", image=self._icon("brand")).pack(
-            side="left", padx=(0, 10))
-        ctk.CTkLabel(brand, text="CNKI 引文",
+        ctk.CTkLabel(brand, text="CNKI 引文查询",
                      font=ctk.CTkFont(size=15, weight="bold"),
-                     text_color="#ffffff").pack(side="left")
+                     text_color=C["primary_text"][m]).pack(side="left")
 
         ctk.CTkLabel(side, text="工作模式",
                      font=ctk.CTkFont(size=10),
@@ -517,8 +639,8 @@ class CNKIGui:
     def _get_template_path(self):
         name = "批量引文模板.xlsx"
         if getattr(sys, "frozen", False):
-            return os.path.join(sys._MEIPASS, name)
-        return os.path.join(Path(__file__).resolve().parent, name)
+            return os.path.join(sys._MEIPASS, "assets", name)
+        return os.path.join(Path(__file__).resolve().parent, "assets", name)
 
     def _download_template(self):
         src = self._get_template_path()
@@ -820,17 +942,46 @@ class CNKIGui:
     #  系统托盘
     # ════════════════════════════════════════════
     @staticmethod
-    def _make_tray_icon() -> Image.Image:
-        s = 64
-        img = Image.new("RGBA", (s, s), (0, 0, 0, 0))
-        d = ImageDraw.Draw(img)
-        d.rounded_rectangle([8, 8, 56, 56], radius=16, fill=(22, 119, 255, 255))
-        w = (255, 255, 255, 255)
-        d.line([24, 24, 24, 40], fill=w, width=5)
-        d.line([24, 24, 34, 24], fill=w, width=5)
-        d.line([40, 24, 40, 40], fill=w, width=5)
-        d.line([40, 24, 50, 24], fill=w, width=5)
-        return img
+    def _make_tray_icon(mode=None):
+        """生成托盘图标：加载设计图标 PNG（透明圆角外，干净无锯齿）。
+        mode: 0=Light / 1=Dark；None 则用当前系统模式。"""
+        return CNKIGui._resize_icon(64, mode=mode)
+
+    def _update_icons_for_mode(self, mode):
+        """统一更新所有图标（标题栏/任务栏 + 系统托盘）为指定模式。
+        必须在主线程调用（通过 root.after）。"""
+        if not hasattr(self, "root") or not self.root.winfo_exists():
+            return
+        self._current_icon_mode = mode
+        try:
+            # 1) 标题栏 + 任务栏 + Alt+Tab：iconbitmap（CTk 不会覆盖）
+            self._set_window_icon(mode)
+            # 2) 系统托盘（pystray 支持运行时替换 icon 属性）
+            if self._tray_icon is not None:
+                tray_img = self._make_tray_icon(mode=mode)
+                self._tray_icon.icon = tray_img
+        except Exception as e:
+            print(f"[图标] 切换模式 {mode} 失败: {e}")
+
+    def _start_theme_watcher(self):
+        """后台线程：每 3 秒轮询系统明暗模式，变化时切图标。
+        系统主题切换频率极低，轮询开销可忽略。"""
+        def _watcher():
+            while True:
+                try:
+                    new_mode = 1 if CNKIGui._system_is_dark() else 0
+                    if getattr(self, "_current_icon_mode", 0) != new_mode:
+                        # 回到主线程更新 UI
+                        self.root.after(0, lambda m=new_mode: (
+                            self._update_icons_for_mode(m),
+                            print(f"[图标] 已切换为{'亮色' if m==0 else '暗色'}模式图标")
+                        ))
+                except Exception:
+                    pass
+                import time
+                time.sleep(3)
+        t = threading.Thread(target=_watcher, daemon=True)
+        t.start()
 
     def _on_close(self):
         # 点 X：仅隐藏窗口，托盘图标保持常驻（若意外未创建则补建）
@@ -846,7 +997,7 @@ class CNKIGui:
             pystray.MenuItem("退出", self._quit),
         )
         self._tray_icon = pystray.Icon(
-            "CNKI引文工具", self._make_tray_icon(),
+            "CNKI引文工具", self._make_tray_icon(mode=self._mi),
             "CNKI 论文引文获取工具", menu)
         # 非守护线程：保证窗口隐藏（withdraw）后进程仍存活，靠托盘图标常驻
         threading.Thread(target=self._tray_icon.run, daemon=False).start()
@@ -864,6 +1015,10 @@ class CNKIGui:
     def run(self):
         # 启动时即在系统托盘常驻显示图标（窗口打开时也能看到）
         self._show_tray()
+        # 后台监听系统明暗模式变化，自动切换图标
+        self._start_theme_watcher()
+        print(f"[启动] 初始模式: {'暗色' if self._mi else '亮色'} (self._mi={self._mi})")
+
         self.root.after(2500, lambda: self._check_update(silent=True))
         self.root.mainloop()
 
