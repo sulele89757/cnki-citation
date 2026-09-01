@@ -580,10 +580,73 @@ class CNKIGui:
                       corner_radius=8, width=120, height=36).pack(
             anchor="w", padx=20, pady=(0, 10))
 
+        # ── 历史清理 ──
+        hist_frame = ctk.CTkFrame(inner, fg_color="transparent")
+        hist_frame.pack(anchor="w", padx=20, pady=(6, 10), fill="x")
+        ctk.CTkButton(hist_frame, text="清理历史记录",
+                      command=self._clean_history,
+                      fg_color=C["fill"][m],
+                      hover_color=C["border_light"][m],
+                      text_color=C["text"][m],
+                      font=ctk.CTkFont(size=12, weight="bold"),
+                      corner_radius=8, width=120, height=36).pack(side="left")
+        self.history_count_label = ctk.CTkLabel(
+            hist_frame, text=self._history_count_text(),
+            font=ctk.CTkFont(size=11),
+            text_color=C["text_muted"][m])
+        self.history_count_label.pack(side="left", padx=(10, 0))
+
         ctk.CTkLabel(inner, text=f"当前版本 v{APP_VERSION}",
                      font=ctk.CTkFont(size=11),
                      text_color=C["text_muted"][m]).pack(
             anchor="w", padx=20, pady=(0, 20))
+
+    # ── 历史清理 ──
+    @staticmethod
+    def _history_files():
+        """OUTPUT_DIR 下生成的引文/调试文件（txt/json/png），不含浏览器 Profile。"""
+        out_dir = core.OUTPUT_DIR
+        if not out_dir.exists():
+            return []
+        return [p for p in out_dir.iterdir()
+                if p.is_file() and p.suffix.lower() in (".txt", ".json", ".png")]
+
+    def _history_count_text(self):
+        n = len(CNKIGui._history_files())
+        return f"历史输出：{n} 个文件" if n else "历史输出：空"
+
+    def _refresh_history_count(self):
+        lbl = getattr(self, "history_count_label", None)
+        if lbl is not None:
+            lbl.configure(text=self._history_count_text())
+
+    def _clean_history(self):
+        """清理历史输出：删除 OUTPUT_DIR 下生成的引文 txt/json 与调试 png。
+
+        不触碰 .chrome_profile（登录态/指纹），仅清 output 目录里的产物。
+        """
+        files = CNKIGui._history_files()
+        if not files:
+            messagebox.showinfo("清理历史", "历史输出目录为空，无需清理。")
+            return
+        total = sum(f.stat().st_size for f in files)
+        ok = messagebox.askyesno(
+            "清理历史记录",
+            f"将删除历史输出目录中的 {len(files)} 个文件"
+            f"（约 {total / 1024 / 1024:.2f} MB）：\n{core.OUTPUT_DIR}\n\n"
+            "此操作不可恢复，确定继续？")
+        if not ok:
+            return
+        removed = 0
+        for f in files:
+            try:
+                f.unlink()
+                removed += 1
+            except OSError:
+                pass
+        self._refresh_history_count()
+        messagebox.showinfo("清理完成", f"已清理 {removed} 个历史文件。")
+        self._log("清理", f"已删除 {removed} 个历史输出文件（{core.OUTPUT_DIR}）")
 
     # ════════════════════════════════════════════
     #  导航切换
@@ -600,6 +663,8 @@ class CNKIGui:
         for view in (self.single_view, self.batch_view, self.settings_view):
             view.pack_forget()
         getattr(self, f"{key}_view").pack(fill="both", expand=True)
+        if key == "settings":
+            self._refresh_history_count()
 
     # ════════════════════════════════════════════
     #  组件工厂
