@@ -7,6 +7,7 @@ import os
 import re
 import sys
 import shutil
+import subprocess
 import tempfile
 import time
 import urllib.request
@@ -982,29 +983,50 @@ class CNKIGui:
         threading.Thread(target=_download, daemon=True).start()
 
     def _write_updater_bat(self, new_exe_path):
-        """写 bat 替换脚本，然后退出当前程序。bat 会：等进程退出 → 替换 exe → 启动新版 → 自删"""
-        import win32api
-        current_exe = win32api.GetModuleFileName(0)  # 当前运行的 exe 绝对路径
+        """写 bat 替换脚本，启动它，然后退出当前程序。
+
+        bat 会：每 2 秒尝试 move /Y 替换旧 exe（失败说明旧进程还在持文件，
+        等下次重试），成功则启动新版、删除自身。最多重试 30 次（60s 超时）。
+        """
+        # PyInstaller --onefile 下 sys.executable 就是当前 exe 的绝对路径；
+        # 比 win32api.GetModuleFileName 更可靠（pywin32 不在 hidden-imports，
+        # 也不一定被传递依赖打进 bundle）。
+        current_exe = sys.executable
         bat_path = os.path.join(tempfile.gettempdir(), "update_cnki.bat")
 
-        # bat 脚本：等待原进程退出 → 替换 → 启动新版 → 删除自身
+        # bat 脚本以 GBK 写入（cmd 按系统 OEM/936 读），开头 chcp 936 保证中文回显正常。
         bat_content = (
             "@echo off\r\n"
             f'title {APP_NAME} - 更新中...\r\n'
-            "chcp 65001 >nul\r\n"
+            "chcp 936 >nul\r\n"
             "echo 正在更新，请稍候...\r\n"
             "echo 等待旧版本关闭...\r\n"
+            "set TRIES=0\r\n"
             ":wait_loop\r\n"
-            f'ping -n 2 127.0.0.1 >nul 2>&1\r\n'
-            f'if exist "{current_exe}" goto wait_loop\r\n'
-            "echo 旧版本已关闭，正在替换文件...\r\n"
-            f'move /Y "{new_exe_path}" "{current_exe}"\r\n'
+            "set /a TRIES+=1\r\n"
+            "if %TRIES% GTR 30 (\r\n"
+            "    echo 等待超时（60s），请手动关闭旧版本后重试。\r\n"
+            "    pause\r\n"
+            "    exit /b 1\r\n"
+            ")\r\n"
+            "ping -n 2 127.0.0.1 >nul 2>&1\r\n"
+            f'move /Y "{new_exe_path}" "{current_exe}" >nul 2>&1\r\n'
+            "if errorlevel 1 goto wait_loop\r\n"
             "echo 更新完成！正在启动新版本...\r\n"
             f'start "" "{current_exe}"\r\n'
             'del "%~f0"\r\n'
         )
         with open(bat_path, "w", encoding="gbk") as f:
             f.write(bat_content)
+
+        # 关键修复：之前漏了启动 bat，导致下载完只退出旧程序不替换。
+        # DETACHED_PROCESS(0x08) 让 bat 不继承当前控制台（无窗口闪烁），
+        # CREATE_NEW_PROCESS_GROUP 让 bat 与当前进程解耦，当前进程退出后 bat 继续跑。
+        subprocess.Popen(
+            [bat_path],
+            creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
+            close_fds=True,
+        )
 
         self._log("[更新] 下载完成，即将重启...")
         # 延迟一点退出，让用户看到"下载完成"提示
