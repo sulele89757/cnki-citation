@@ -13,3 +13,4 @@ customtkinter==6.0.0        # GUI（跟随系统主题）
 Pillow==12.3.0              # 生成 app.ico 图标 + 托盘图标
 pystray==0.19.5             # 系统托盘（最小化到状态栏）
 pyinstaller==6.22.2         # 打包单文件 exe（--onefile --windowed）
+certifi                     # 提供 CA 证书包，修复冻结 exe 的 SSL 校验失败（CERTIFICATE_VERIFY_FAILED）

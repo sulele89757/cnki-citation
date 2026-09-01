@@ -21,6 +21,8 @@ import sys
 import random
 import argparse
 import urllib.request
+import ssl
+import certifi
 from pathlib import Path
 from typing import Optional, List, Tuple
 from datetime import datetime
@@ -69,6 +71,12 @@ def _norm_ver(v: str) -> Tuple[int, int, int]:
     return tuple(int(x) for x in nums)
 
 
+def _ssl_ctx():
+    """用 certifi 的 CA 证书包构建 SSL 上下文，避免冻结 exe 在缺根证书的机器上
+    报 CERTIFICATE_VERIFY_FAILED（unable to get local issuer certificate）。"""
+    return ssl.create_default_context(cafile=certifi.where())
+
+
 def check_update() -> dict:
     """检测 Gitee 仓库最新 Release。
 
@@ -85,7 +93,7 @@ def check_update() -> dict:
             url += "?access_token=" + GITEE_TOKEN
         req = urllib.request.Request(
             url, headers={"User-Agent": "CNKI-Citation-Tool"})
-        with urllib.request.urlopen(req, timeout=8) as resp:
+        with urllib.request.urlopen(req, timeout=8, context=_ssl_ctx()) as resp:
             data = json.loads(resp.read().decode("utf-8"))
         latest = (data.get("tag_name") or data.get("name") or "").strip()
         if not latest:
@@ -102,7 +110,7 @@ def check_update() -> dict:
                            f"?access_token={GITEE_TOKEN}")
                 att_req = urllib.request.Request(att_url,
                                                 headers={"User-Agent": "CNKI-Citation-Tool"})
-                with urllib.request.urlopen(att_req, timeout=10) as att_resp:
+                with urllib.request.urlopen(att_req, timeout=10, context=_ssl_ctx()) as att_resp:
                     attachments = json.loads(att_resp.read().decode("utf-8"))
                 if isinstance(attachments, list):
                     for a in attachments:
