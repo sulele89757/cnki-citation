@@ -1,9 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="知网引文图标（深色模式）">
   <title>知网引文（深色模式）</title>
-  <!-- 深色模式版：透明背景 + 橙色描边圆角边框（保留品牌色，深色背景上仍清晰）+ 内部白色手写体「知」 -->
+  <!-- 不透明圆角底：深灰底 + 橙色描边圆角边框 + 内部白色手写体「知」，自包含在任意背景下都清晰 -->
   <!-- 边框色取自 CNKI 官方 favicon (kns.cnki.net) 真实品牌色 #FF873F -->
   <rect x="31" y="31" width="450" height="450" rx="113" ry="113"
-        fill="none" stroke="#FF873F" stroke-width="38"/>
+        fill="#1E1E1E" stroke="#FF873F" stroke-width="38"/>
   <!-- 内部白色手写体「知」（华文行楷）：水平居中，垂直居中落在画布高度 50% 处 -->
   <text x="256" y="256"
         font-family="'STXingkai','华文行楷','KaiTi','楷体','STKaiti','SimKai',serif"

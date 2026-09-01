@@ -113,10 +113,11 @@ cnki_search/
 ├── build_release.py          # 本地构建 + 发布脚本
 ├── clear_icon_cache.bat      # 一键清理 Windows 图标缓存
 ├── requirements.txt          # 依赖清单
-├── assets/                   # 静态资源（图标 + 模板，打包进 exe）
+├── assets/                   # 静态资源（图标 + 模板，打包进 exe），所有资源统一放此目录
 │   ├── app.ico               # 程序/任务栏窗口图标（多尺寸）
-│   ├── cnki_icon.png/.svg    # 亮色主题图标（蓝底「知」）
-│   ├── cnki_icon_dark.png/.svg  # 暗色主题图标（橙色边框）
+│   ├── cnki_icon.png/.svg    # 亮色主题图标（白底 + 橙色外框 + 黑色手写「知」，不透明）
+│   ├── cnki_icon_dark.png/.svg  # 深色主题图标（深灰底 + 橙色外框 + 白色手写「知」，不透明）
+│   ├── cnki_icon.ico / cnki_icon_dark.ico  # 多分辨率 ICO（16~256，窗口/任务栏用）
 │   └── 批量引文模板.xlsx      # 批量模式 Excel 模板
 ├── .github/workflows/
 │   ├── build.yml             # GitHub Actions CI/CD

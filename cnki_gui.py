@@ -228,22 +228,17 @@ class CNKIGui:
         - iconbitmap(.ico文件路径) → Windows 原生级别，CTk 不会覆盖
         - iconphoto(PhotoImage) → CTk 管理的对象，会被反复重置
         因此必须用 iconbitmap()，且必须在 _build / set_theme 之后调用。
-        """
-        import tempfile
-        icon_name = CNKIGui._ICON_NAMES.get(mode, "cnki_icon.png")
-        png_path = CNKIGui._icon_path(icon_name)
 
-        # iconbitmap() 需要 .ico 文件，从 PNG 生成多尺寸 ICO。
-        # 关键：必须含 24x24（任务栏按钮尺寸）+ 16/32/48/64/128/256，
-        # 否则 Windows 选不到精确尺寸会强行缩放 → 马赛克。
+        直接加载预生成的多分辨率 ICO（assets/cnki_icon[_dark].ico，
+        含 16/20/24/32/40/48/64/128/256 共 9 帧），避免运行时 Pillow
+        save(sizes=...) 内部 thumbnail 重采样质量不稳、版本差异，导致
+        任务栏图标糊。
+        """
+        ico_name = CNKIGui._ICON_NAMES.get(mode, "cnki_icon.png").replace(".png", ".ico")
+        ico_path = CNKIGui._icon_path(ico_name)
         try:
-            img = Image.open(png_path).convert('RGBA')
-            sizes = [(16, 16), (24, 24), (32, 32), (48, 48),
-                     (64, 64), (128, 128), (256, 256)]
-            tmp_ico = os.path.join(tempfile.gettempdir(), f'cnki_icon_mode{mode}.ico')
-            img.save(tmp_ico, format='ICO', sizes=sizes)
-            self.root.iconbitmap(tmp_ico)
-            print(f"[图标] iconbitmap 已设置: {icon_name} (含24x24等7尺寸)")
+            self.root.iconbitmap(ico_path)
+            print(f"[图标] iconbitmap 已设置: {ico_name} (9 帧: 16/20/24/32/40/48/64/128/256)")
         except Exception as e:
             print(f"[图标] iconbitmap 设置失败: {e}")
 

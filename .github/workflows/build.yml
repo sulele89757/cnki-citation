@@ -61,6 +61,8 @@ jobs:
             --add-data "assets/批量引文模板.xlsx;assets" \
             --add-data "assets/cnki_icon.png;assets" \
             --add-data "assets/cnki_icon_dark.png;assets" \
+            --add-data "assets/cnki_icon.ico;assets" \
+            --add-data "assets/cnki_icon_dark.ico;assets" \
             cnki_gui.py
 
       - name: Upload to GitHub Release
