@@ -35,3 +35,4 @@ Thumbs.db
 _*.png
 favicon.ico
 auto_build.py
+*.bat
