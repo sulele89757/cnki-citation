@@ -50,7 +50,10 @@ jobs:
       - name: Build exe (PyInstaller)
         # 资源文件都在 assets/ 子目录；运行时代码从 sys._MEIPASS/assets 读取，
         # 故 --add-data 的源路径与目标目录都必须带 assets/ 前缀。
+        # 先删掉可能残留的旧 .spec：re-run 会复用 runner 并保留上次生成的 spec，
+        # PyInstaller 会“Appending 'datas' from .spec”沿用旧的相对路径导致失败。
         run: |
+          rm -f "CNKI引文工具.spec"
           python -m PyInstaller --name "CNKI引文工具" --onefile --windowed --icon assets/app.ico \
             --hidden-import customtkinter --hidden-import playwright_stealth \
             --hidden-import openpyxl --hidden-import pystray \
