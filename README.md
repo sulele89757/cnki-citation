@@ -11,7 +11,7 @@
   - 间隔控制：随机间隔 + 偶发长停顿，规避速率校验
   - 内置「下载 Excel 模板」按钮（基于 `批量引文模板.xlsx`）
 - **拟人化反爬**：系统真实 Chrome + 持久化 Profile + playwright-stealth + 贝塞尔鼠标轨迹 / 逐字输入 / 随机滚动
-- **系统托盘**：点「X」最小化到状态栏（蓝底白「知」图标），不退出；右键托盘菜单恢复 / 退出
+- **系统托盘**：点「X」最小化到状态栏（知网风格「知」图标，白/深灰底 + 橙色外框 + 手写「知」），不退出；右键托盘菜单恢复 / 退出
 - **自更新**：检测到新版本后一键下载并自动替换重启（私有仓库通过 Gitee API 签名下载）
 - **单例模式**：禁止同时运行多个实例
 - **清理历史**：设置页一键清理历史输出（引文 txt/json 与调试截图），不含浏览器 Profile，可释放多次运行累积的文件
@@ -110,14 +110,14 @@ python build_release.py
 cnki_search/
 ├── cnki_citation.py          # 核心：搜索、反爬、引文提取、更新检测
 ├── cnki_gui.py               # GUI（v4 左导航三视图 + 托盘 + 自更新）
-├── build_release.py          # 本地构建 + 发布脚本
 ├── clear_icon_cache.bat      # 一键清理 Windows 图标缓存
 ├── requirements.txt          # 依赖清单
 ├── assets/                   # 静态资源（图标 + 模板，打包进 exe），所有资源统一放此目录
-│   ├── app.ico               # 程序/任务栏窗口图标（多尺寸）
+│   ├── app.ico               # 程序/任务栏窗口图标（9 帧多尺寸）
+│   ├── generate_icons.py     # 图标生成器：按尺寸分级绘制，避免小帧下采样发糊
 │   ├── cnki_icon.png/.svg    # 亮色主题图标（白底 + 橙色外框 + 黑色手写「知」，不透明）
 │   ├── cnki_icon_dark.png/.svg  # 深色主题图标（深灰底 + 橙色外框 + 白色手写「知」，不透明）
-│   ├── cnki_icon.ico / cnki_icon_dark.ico  # 多分辨率 ICO（16~256，窗口/任务栏用）
+│   ├── cnki_icon.ico / cnki_icon_dark.ico  # 多分辨率 ICO（16~256，窗口/任务栏用，小帧去「知」加粗框）
 │   └── 批量引文模板.xlsx      # 批量模式 Excel 模板
 ├── .github/workflows/
 │   ├── build.yml             # GitHub Actions CI/CD
