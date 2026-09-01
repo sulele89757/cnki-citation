@@ -53,8 +53,8 @@ jobs:
         # 先删掉可能残留的旧 .spec：re-run 会复用 runner 并保留上次生成的 spec，
         # PyInstaller 会“Appending 'datas' from .spec”沿用旧的相对路径导致失败。
         run: |
-          rm -f "CNKI引文工具.spec"
-          python -m PyInstaller --name "CNKI引文工具" --onefile --windowed --icon assets/app.ico \
+          rm -f "CNKICitationTool.spec"
+          python -m PyInstaller --name "CNKICitationTool" --onefile --windowed --icon assets/app.ico \
             --hidden-import customtkinter --hidden-import playwright_stealth \
             --hidden-import openpyxl --hidden-import pystray \
             --collect-all playwright --collect-all playwright_stealth --collect-all pystray \
@@ -68,7 +68,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         with:
           name: ${{ github.ref_name }}
-          files: dist/CNKI引文工具.exe
+          files: dist/CNKICitationTool.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -79,7 +79,7 @@ jobs:
           PYTHONUNBUFFERED: "1"
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
           VERSION: ${{ steps.ver.outputs.version }}
-          EXE_PATH: dist/CNKI引文工具.exe
+          EXE_PATH: dist/CNKICitationTool.exe
           NOTES: ${{ github.event.head_commit.message }}
           BRANCH: main
         run: python .github/workflows/sync_gitee.py

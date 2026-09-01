@@ -25,6 +25,12 @@ import cnki_citation as core
 
 APP_VERSION = core.APP_VERSION
 
+# 机器标识名（仅英文/数字）：用于 exe 文件名、托盘图标名、单例锁查找、
+# 自更新临时文件名等“系统内部”场景。GitHub Actions(Windows) 会剥掉文件名中的
+# 非 ASCII 字符，--name 若含中文会被压成 CNKI.exe，故内部一律用英文稳定名。
+# 中文仅保留在面向用户的界面文案里（窗口标题、标签、提示等），不影响功能。
+APP_NAME = "CNKICitationTool"
+
 
 # ── 单例锁：防止启动多个实例（Windows Mutex via ctypes，零依赖）──
 def _check_singleton():
@@ -61,6 +67,7 @@ def _check_singleton():
     if handle == 0 or kernel32.GetLastError() == ERROR_ALREADY_EXISTS:
         # 已有实例在运行：激活其窗口
         try:
+            # 注意：FindWindowW 匹配的是 self.root.title() 设置的中文窗口标题
             hwnd = user32.FindWindowW(None, "CNKI 引文工具")
             if hwnd:
                 if user32.IsIconic(hwnd):
@@ -868,7 +875,7 @@ class CNKIGui:
         def _download():
             last_pct = -1
             try:
-                new_exe = os.path.join(tempfile.gettempdir(), "CNKI引文工具_new.exe")
+                new_exe = os.path.join(tempfile.gettempdir(), APP_NAME + "_new.exe")
                 req = urllib.request.Request(
                     download_url, headers={"User-Agent": "CNKI-Citation-Tool-Updater"})
                 with urllib.request.urlopen(req, timeout=600) as resp:
@@ -918,7 +925,7 @@ class CNKIGui:
         # bat 脚本：等待原进程退出 → 替换 → 启动新版 → 删除自身
         bat_content = (
             "@echo off\r\n"
-            f'title CNKI 引文工具 - 更新中...\r\n'
+            f'title {APP_NAME} - 更新中...\r\n'
             "chcp 65001 >nul\r\n"
             "echo 正在更新，请稍候...\r\n"
             "echo 等待旧版本关闭...\r\n"
@@ -997,7 +1004,7 @@ class CNKIGui:
             pystray.MenuItem("退出", self._quit),
         )
         self._tray_icon = pystray.Icon(
-            "CNKI引文工具", self._make_tray_icon(mode=self._mi),
+            APP_NAME, self._make_tray_icon(mode=self._mi),
             "CNKI 论文引文获取工具", menu)
         # 非守护线程：保证窗口隐藏（withdraw）后进程仍存活，靠托盘图标常驻
         threading.Thread(target=self._tray_icon.run, daemon=False).start()

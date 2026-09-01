@@ -33,7 +33,9 @@ import urllib.error
 import uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-EXE_NAME = "CNKI引文工具"
+# 仅英文/数字：GitHub Actions(Windows) 会剥掉文件名中非 ASCII 字符，
+# 含中文的 --name 会被压成 CNKI.exe，故 exe 内部名统一用英文稳定名。
+EXE_NAME = "CNKICitationTool"
 APP_ICON = os.path.join(HERE, "assets", "app.ico")
 MAIN_SCRIPT = os.path.join(HERE, "cnki_gui.py")
 
