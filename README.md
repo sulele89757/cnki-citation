@@ -24,7 +24,8 @@
 
 ## 快速开始（exe 版）
 
-1. 从 [Gitee 发行版](https://gitee.com/sulele/cnki-citation/releases) 下载 `CNKI引文工具.exe`
+1. 从 [Gitee 发行版](https://gitee.com/sulele/cnki-citation/releases) 下载 `CNKICitationTool.exe`
+   （exe 文件名是英文，但软件窗口标题仍为「CNKI 引文工具」，原因见文末「关于 exe 文件名」）
 2. 双击运行（首次可能需手动过一次验证码，之后 Profile 自动复用）
 3. 单篇：输入标题 →「获取引文」；批量：选 Excel →「开始批量处理」
 
@@ -62,13 +63,19 @@ python cnki_citation.py --excel papers.xlsx  # 命令行批量
 
 ## CI/CD（GitHub Actions → Gitee）
 
+**方式 A — 正式发布（构建 + 发 GitHub/Gitee Release）：**
+
 ```
-git tag v1.x.x && git push github main --tags
+git tag v1.x.x && git push github --tags
 ```
+
+**方式 B — 仅构建验证（不发 Release）：** 在 GitHub 仓库 Actions 页对 `Build and Release` 点 **Run workflow**（取最新 main，只构建不上传）。
+
+> ⚠️ 不要用旧失败 job 的 **Re-run**：它会锁定旧 commit SHA，跑的是修复前的配置。务必发起全新运行（上述 A 或 B）。
 
 触发 `.github/workflows/build.yml`：
 
-1. `windows-latest` + PyInstaller 构建 exe
+1. `windows-latest` + PyInstaller 构建 exe（`rm -f` 清残留 spec 后构建，避免 re-run 沿用旧 datas 路径）
 2. 发布到 **GitHub Release**
 3. `sync_gitee.py` 同步到 **Gitee Releases**（国内下载源）
 
@@ -84,7 +91,17 @@ python build_release.py --dry-run
 python build_release.py
 ```
 
-产物：`dist/CNKI引文工具.exe`（~57MB 单文件）
+产物：`dist/CNKICitationTool.exe`（~57MB 单文件）
+
+> **关于 exe 文件名**
+> GitHub Actions 的 Windows runner 会剥掉文件名中的非 ASCII 字符：`--name` 若含中文，
+> 构建出的 exe 会被压成 `CNKI.exe`。因此内部标识统一固定为英文
+> `APP_NAME = "CNKICitationTool"`（`cnki_gui.py`），用于 exe 文件名、托盘图标名、
+> 自更新临时文件名；中文仅保留在用户界面文案（窗口标题「CNKI 引文工具」、品牌标签、
+> 提示语、托盘 tooltip），不影响任何功能。
+> 打包时资源均在 `assets/` 子目录，`--add-data` 的源路径与目标目录都必须是
+> `assets/批量引文模板.xlsx;assets` 这种带 `assets/` 前缀的写法（运行时从
+> `sys._MEIPASS/assets` 读取）。
 
 ## 目录结构
 
@@ -105,7 +122,7 @@ cnki_search/
 │   └── sync_gitee.py         # 同步 Release 到 Gitee
 ├── README.md
 └── dist/                     # 构建产物
-    └── CNKI引文工具.exe
+    └── CNKICitationTool.exe
 ```
 
 ## 常见问题
