@@ -1067,7 +1067,6 @@ class CNKIGui:
                         ))
                 except Exception:
                     pass
-                import time
                 time.sleep(3)
         t = threading.Thread(target=_watcher, daemon=True)
         t.start()

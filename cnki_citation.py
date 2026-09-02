@@ -21,13 +21,14 @@ import sys
 import random
 import argparse
 import urllib.request
+import urllib.parse
 import ssl
 import certifi
 from pathlib import Path
 from typing import Optional, List, Tuple
 from datetime import datetime
 
-from playwright.async_api import async_playwright, Page, BrowserContext
+from playwright.async_api import async_playwright, Page
 from playwright_stealth import Stealth
 import openpyxl
 from openpyxl.utils import column_index_from_string
@@ -300,9 +301,7 @@ async def check_block(page: Page) -> bool:
     )
 
     if need:
-        print("\n" + "=" * 62)
-        print("  需要人工介入：请在浏览器窗口中完成登录 / 验证码")
-        print("=" * 62)
+        log("⚠ 需人工介入", "请在浏览器窗口中完成登录 / 验证码")
         await user_confirm("完成后按回车继续...")
         await asyncio.sleep(1.5)
         return True
@@ -313,11 +312,9 @@ async def search_paper(page: Page, title: str, H: Optional[HumanBehavior]) -> bo
     """搜索论文。优先用直接 URL（最可靠），H 为 None 时跳过拟人"""
     log("2/4", f"搜索：{title}")
 
-    if await check_block(page):
-        pass
+    await check_block(page)
 
     # ── 策略 A：直接构造搜索 URL（绕过首页，100% 可靠）──
-    import urllib.parse
     kw = urllib.parse.quote(title)
     # kns8s 是 CNKI 新版搜索系统；korder=TI 表示按标题匹配
     search_url = f"https://kns.cnki.net/kns8s/defaultresult/index?kw={kw}&korder=TI"
@@ -337,12 +334,9 @@ async def search_paper(page: Page, title: str, H: Optional[HumanBehavior]) -> bo
         pass
     await asyncio.sleep(2)
 
-    # 调试
     log("   ", f"当前 URL: {page.url}")
-    await page.screenshot(path=str(OUTPUT_DIR / "debug_search_result.png"))
 
-    if await check_block(page):
-        pass
+    await check_block(page)
 
     return True
 
@@ -795,7 +789,6 @@ def main():
     ap.add_argument("--out-col", default="引文", help="Excel 引文列（不存在则自动新建），默认 引文")
     ap.add_argument("--connect", action="store_true", help="连接已打开的 Chrome（--remote-debugging-port=9222）")
     ap.add_argument("--cdp", default="http://localhost:9222", help="CDP 地址")
-    ap.add_argument("--headless", action="store_true", help="无头模式（会显著降低拟人度，不推荐）")
     ap.add_argument("--fast", action="store_true", help="关闭拟人行为（快速但更易触发校验）")
     ap.add_argument("-o", "--out", default="citations", help="输出文件名前缀")
     ap.add_argument("--min-gap", type=float, default=5.0, help="搜索间隔下限(秒)，默认 5")
