@@ -57,9 +57,9 @@ jobs:
           python -m PyInstaller --name "CNKICitationTool" --onefile --windowed --icon assets/app.ico \
             --hidden-import customtkinter --hidden-import playwright_stealth \
             --hidden-import openpyxl --hidden-import pystray \
-  --collect-all playwright --collect-all playwright_stealth --collect-all pystray \
-  --hidden-import certifi \
-  --add-data "assets/批量引文模板.xlsx;assets" \
+            --collect-all playwright --collect-all playwright_stealth --collect-all pystray \
+            --hidden-import certifi \
+            --add-data "assets/批量引文模板.xlsx;assets" \
             --add-data "assets/cnki_icon.png;assets" \
             --add-data "assets/cnki_icon_dark.png;assets" \
             --add-data "assets/cnki_icon.ico;assets" \
