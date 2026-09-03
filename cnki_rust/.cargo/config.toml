@@ -1,0 +1,5 @@
+# 静态链接 MSVC 运行时（crt-static），让 release exe 不依赖 vcruntime140.dll，
+# 拷贝到任意 Windows 机器（无需装 VC++ 运行库）即可直接运行。
+# 代价：exe 体积略增、链接变慢；仅影响本 crate，不影响其它项目。
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

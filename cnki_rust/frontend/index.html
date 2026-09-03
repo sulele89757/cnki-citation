@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CNKI 引文工具</title>
+  <link rel="stylesheet" href="styles.css" />
+  <!-- 首屏底色：在 styles.css 加载前先按系统主题铺底，避免白/黑闪一下 -->
+  <style>
+    html { background: #ffffff; }
+    @media (prefers-color-scheme: dark) { html { background: #0f1117; } }
+    html[data-theme="light"] { background: #ffffff; }
+    html[data-theme="dark"] { background: #0f1117; }
+  </style>
+</head>
+<body>
+  <!-- 自定义深色标题栏（拖拽区 + 最小化/关闭） -->
+  <div class="titlebar" data-tauri-drag-region>
+    <div class="titlebar-title" data-tauri-drag-region>
+      <span class="brand-dot"></span> CNKI 引文工具
+    </div>
+    <div class="titlebar-btns">
+      <button class="win-btn" id="btn-min" title="最小化">&#8211;</button>
+      <button class="win-btn" id="btn-close" title="关闭（最小化到托盘）">&#10005;</button>
+    </div>
+  </div>
+
+  <div class="app">
+    <!-- 左侧暗色导航 -->
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-logo">知</div>
+        <div class="brand-text">
+          <div class="brand-name">CNKI 引文查询</div>
+          <div class="brand-sub">GB/T 7714-2025</div>
+        </div>
+      </div>
+
+      <div class="nav-label">工作模式</div>
+      <nav class="nav">
+        <button class="nav-item active" data-view="single">
+          <svg viewBox="0 0 24 24" class="nav-icon"><path d="M6 3h9l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M14 3v6h6"/><path d="M8 13h8M8 17h6"/></svg>
+          <span>单篇抓取</span>
+        </button>
+        <button class="nav-item" data-view="batch">
+          <svg viewBox="0 0 24 24" class="nav-icon"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+          <span>批量处理</span>
+        </button>
+        <button class="nav-item" data-view="settings">
+          <svg viewBox="0 0 24 24" class="nav-icon"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg>
+          <span>设置</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-footer" id="sidebar-version">v1.0.4</div>
+    </aside>
+
+    <!-- 右侧内容区 -->
+    <main class="content">
+      <!-- 单篇视图 -->
+      <section class="view active" id="view-single">
+        <div class="card">
+          <h2 class="card-title">单篇抓取</h2>
+          <p class="card-desc">输入论文标题，自动获取 GB/T 7714-2025 格式引文</p>
+
+          <label class="field-label">论文标题</label>
+          <input class="input" id="single-title" type="text"
+                 placeholder="如：新形势下企业财务管理信息化建设的途径探索" />
+
+          <button class="btn btn-primary btn-block" id="btn-single">获取引文</button>
+
+          <label class="field-label">获取结果</label>
+          <div class="result-box" id="single-result">点击「获取引文」后，结果将显示在此处，可直接复制使用。</div>
+
+          <div class="result-actions">
+            <button class="btn btn-ghost" id="btn-copy" disabled>一键复制</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- 批量视图 -->
+      <section class="view" id="view-batch">
+        <div class="card">
+          <h2 class="card-title">批量处理</h2>
+          <p class="card-desc">选择 Excel 文件，按标题列批量获取并回填引文</p>
+
+          <div class="row">
+            <button class="btn btn-ghost" id="btn-template">下载 Excel 模板</button>
+            <span class="hint">（含表头与示例：按「标题」列填论文，「引文」列留空）</span>
+          </div>
+
+          <label class="field-label">Excel 文件</label>
+          <div class="file-row">
+            <input class="input" id="batch-path" type="text" placeholder="选择包含论文标题的 .xlsx 文件" />
+            <button class="btn btn-primary" id="btn-browse">浏览</button>
+          </div>
+
+          <div class="row col-inputs">
+            <div class="col-field">
+              <label class="field-label">标题列</label>
+              <input class="input input-sm" id="batch-title-col" type="text" value="标题" />
+            </div>
+            <div class="col-field">
+              <label class="field-label">引文列</label>
+              <input class="input input-sm" id="batch-out-col" type="text" value="引文" />
+            </div>
+          </div>
+          <p class="hint">引文列不存在时自动新建；已填行跳过；每条实时保存。</p>
+
+          <button class="btn btn-primary btn-block" id="btn-batch">开始批量处理</button>
+        </div>
+      </section>
+
+      <!-- 设置视图 -->
+      <section class="view" id="view-settings">
+        <div class="card">
+          <h2 class="card-title">设置</h2>
+
+          <label class="check">
+            <input type="checkbox" id="set-human" checked />
+            <span>拟人模式（推荐，规避机器人校验）</span>
+          </label>
+
+          <div class="row gap">
+            <label class="field-label">搜索间隔（秒）</label>
+            <input class="input input-xs" id="set-min-gap" type="text" value="5" />
+            <span class="tilde">~</span>
+            <input class="input input-xs" id="set-max-gap" type="text" value="12" />
+          </div>
+
+          <button class="btn btn-ghost" id="btn-update">检查更新</button>
+
+          <div class="row gap history-row">
+            <button class="btn btn-ghost" id="btn-clean">清理历史记录</button>
+            <button class="btn btn-ghost" id="btn-open-output">打开输出目录</button>
+            <span class="hint" id="history-count">历史输出：加载中…</span>
+          </div>
+
+          <p class="hint" id="set-version">当前版本 v1.0.4</p>
+        </div>
+      </section>
+
+      <!-- 底栏：进度 + 日志 -->
+      <footer class="bottom">
+        <div class="progress-card">
+          <div class="progress-inner">
+            <div class="progress-track"><div class="progress-fill" id="progress-fill"></div></div>
+            <div class="status" id="status">● 就绪</div>
+          </div>
+        </div>
+        <div class="log-card">
+          <div class="log-head">
+            <span>运行日志</span>
+            <button class="log-clear" id="btn-log-clear">清空</button>
+          </div>
+          <div class="log-box" id="log-box"></div>
+        </div>
+      </footer>
+    </main>
+  </div>
+
+  <!-- 官方 dialog 插件的 IIFE：会挂 window.__TAURI__.dialog（核心全局包里没有它） -->
+  <script src="tauri-dialog.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

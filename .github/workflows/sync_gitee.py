@@ -183,25 +183,41 @@ def main():
     repo = os.environ.get("GITEE_REPO", "").strip()
     token = os.environ.get("GITEE_TOKEN", "").strip()
     version = os.environ.get("VERSION", "").strip()
-    exe = os.environ.get("EXE_PATH", "").strip()
     notes = os.environ.get("NOTES", "")
     branch = os.environ.get("BRANCH", "main")
 
+    # 支持单 exe（EXE_PATH）或双 exe（EXE_PATH_PYTHON + EXE_PATH_RUST）
+    exe_paths = []
+    single = os.environ.get("EXE_PATH", "").strip()
+    if single:
+        exe_paths.append(single)
+    for env_key in ("EXE_PATH_PYTHON", "EXE_PATH_RUST"):
+        p = os.environ.get(env_key, "").strip()
+        if p:
+            exe_paths.append(p)
+
     missing = [n for n, v in (("GITEE_OWNER", owner), ("GITEE_REPO", repo),
-                              ("GITEE_TOKEN", token), ("VERSION", version),
-                              ("EXE_PATH", exe)) if not v]
+                              ("GITEE_TOKEN", token), ("VERSION", version)) if not v]
+    if not exe_paths:
+        missing.append("EXE_PATH 或 EXE_PATH_PYTHON/EXE_PATH_RUST")
     if missing:
         raise SystemExit("缺少环境变量: " + ", ".join(missing))
-    if not os.path.exists(exe):
-        raise SystemExit(f"未找到 exe: {exe}")
+    for p in exe_paths:
+        if not os.path.exists(p):
+            raise SystemExit(f"未找到 exe: {p}")
 
-    print(f"[sync] v{version}  owner={owner} repo={repo} exe={exe} ({os.path.getsize(exe)//1024//1024}MB)", flush=True)
+    print(f"[sync] v{version}  owner={owner} repo={repo}", flush=True)
+    print(f"[sync] 待上传 {len(exe_paths)} 个文件:", flush=True)
+    for p in exe_paths:
+        print(f"  - {p} ({os.path.getsize(p)//1024//1024}MB)", flush=True)
+
     print(f"[sync] 步骤 1/2: 创建/复用 Gitee Release ...", flush=True)
     rid = create_release(owner, repo, token, version, notes, branch)
     print(f"[sync] Release id={rid}", flush=True)
     print(f"[sync] 步骤 2/2: 上传 exe 附件 ...", flush=True)
-    upload_asset(owner, repo, token, rid, exe)
-    print(f"[sync] ✅ 全部完成：exe 已同步到 Gitee Releases v{version}", flush=True)
+    for p in exe_paths:
+        upload_asset(owner, repo, token, rid, p)
+    print(f"[sync] ✅ 全部完成：{len(exe_paths)} 个 exe 已同步到 Gitee Releases v{version}", flush=True)
 
 
 if __name__ == "__main__":

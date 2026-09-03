@@ -1,0 +1,25 @@
+[package]
+name = "cnki-citation-rs"
+version = "1.0.4"
+edition = "2021"
+description = "CNKI 论文引文获取工具 (GB/T 7714-2025) — Tauri 前端"
+default-run = "cnki-citation-rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# tray-icon：系统托盘模块（非默认特性，必须显式开启）
+# image-png：include_image! 宏解码内嵌 PNG 所需
+tauri = { version = "2", features = ["tray-icon", "image-png", "custom-protocol"] }
+tauri-plugin-single-instance = "2"
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# 复用已有的 Rust 抓取引擎（仅启用 browser feature）
+cnki_citation_rs = { path = "..", features = ["browser"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+strip = true
