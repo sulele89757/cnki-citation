@@ -75,9 +75,6 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - name: Install Tauri CLI
-        run: npm install -g @tauri-apps/cli@latest
-
       - name: Cache Cargo registry & index
         uses: actions/cache@v4
         with:
@@ -100,7 +97,7 @@ jobs:
 
       - name: Build Rust exe (Tauri)
         working-directory: cnki_rust/src-tauri
-        run: cargo tauri build --no-bundle
+        run: cargo build --release
 
       - name: Rename Rust exe to CNKICitationTool-rs
         run: |
