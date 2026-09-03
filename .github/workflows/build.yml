@@ -66,9 +66,6 @@ jobs:
             --add-data "assets/cnki_icon.ico;assets" \
             --add-data "assets/cnki_icon_dark.ico;assets" \
             cnki_gui.py
-          # 统一放到 dist/
-          mkdir -p dist
-          cp -f dist/CNKICitationTool.exe dist/CNKICitationTool.exe
 
       # ═════════════════════════════════════════════════════
       # ② Rust / Tauri 构建（CNKICitationTool-rs.exe）
