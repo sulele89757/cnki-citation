@@ -983,49 +983,68 @@ class CNKIGui:
         bat 会：每 2 秒尝试 move /Y 替换旧 exe（失败说明旧进程还在持文件，
         等下次重试），成功则启动新版、删除自身。最多重试 30 次（60s 超时）。
         """
-        # PyInstaller --onefile 下 sys.executable 就是当前 exe 的绝对路径；
-        # 比 win32api.GetModuleFileName 更可靠（pywin32 不在 hidden-imports，
-        # 也不一定被传递依赖打进 bundle）。
-        current_exe = sys.executable
-        bat_path = os.path.join(tempfile.gettempdir(), "update_cnki.bat")
+        # 先更新 UI，让用户知道已进入「替换」阶段（不再显示「下载中」）
+        self.status_label.configure(text="⚙ 正在准备更新...")
+        self._log("[更新] 下载完成，正在写入更新脚本...")
 
-        # bat 脚本以 GBK 写入（cmd 按系统 OEM/936 读），开头 chcp 936 保证中文回显正常。
-        bat_content = (
-            "@echo off\r\n"
-            f'title {APP_NAME} - 更新中...\r\n'
-            "chcp 936 >nul\r\n"
-            "echo 正在更新，请稍候...\r\n"
-            "echo 等待旧版本关闭...\r\n"
-            "set TRIES=0\r\n"
-            ":wait_loop\r\n"
-            "set /a TRIES+=1\r\n"
-            "if %TRIES% GTR 30 (\r\n"
-            "    echo 等待超时（60s），请手动关闭旧版本后重试。\r\n"
-            "    pause\r\n"
-            "    exit /b 1\r\n"
-            ")\r\n"
-            "ping -n 2 127.0.0.1 >nul 2>&1\r\n"
-            f'move /Y "{new_exe_path}" "{current_exe}" >nul 2>&1\r\n'
-            "if errorlevel 1 goto wait_loop\r\n"
-            "echo 更新完成！正在启动新版本...\r\n"
-            f'start "" "{current_exe}"\r\n'
-            'del "%~f0"\r\n'
-        )
-        with open(bat_path, "w", encoding="gbk") as f:
-            f.write(bat_content)
+        try:
+            # PyInstaller --onefile 下 sys.executable 就是当前 exe 的绝对路径；
+            # 比 win32api.GetModuleFileName 更可靠（pywin32 不在 hidden-imports，
+            # 也不一定被传递依赖打进 bundle）。
+            current_exe = sys.executable
+            bat_path = os.path.join(tempfile.gettempdir(), "update_cnki.bat")
 
-        # 关键修复：之前漏了启动 bat，导致下载完只退出旧程序不替换。
-        # DETACHED_PROCESS(0x08) 让 bat 不继承当前控制台（无窗口闪烁），
-        # CREATE_NEW_PROCESS_GROUP 让 bat 与当前进程解耦，当前进程退出后 bat 继续跑。
-        subprocess.Popen(
-            [bat_path],
-            creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
-            close_fds=True,
-        )
+            # bat 脚本以 GBK 写入（cmd 按系统 OEM/936 读），开头 chcp 936 保证中文回显正常。
+            bat_content = (
+                "@echo off\r\n"
+                f'title {APP_NAME} - 更新中...\r\n'
+                "chcp 936 >nul\r\n"
+                "echo 正在更新，请稍候...\r\n"
+                "echo 等待旧版本关闭...\r\n"
+                "set TRIES=0\r\n"
+                ":wait_loop\r\n"
+                "set /a TRIES+=1\r\n"
+                "if %TRIES% GTR 30 (\r\n"
+                "    echo 等待超时（60s），请手动关闭旧版本后重试。\r\n"
+                "    pause\r\n"
+                "    exit /b 1\r\n"
+                ")\r\n"
+                "ping -n 2 127.0.0.1 >nul 2>&1\r\n"
+                f'move /Y "{new_exe_path}" "{current_exe}" >nul 2>&1\r\n'
+                "if errorlevel 1 goto wait_loop\r\n"
+                "echo 更新完成！正在启动新版本...\r\n"
+                f'start "" "{current_exe}"\r\n'
+                'del "%~f0"\r\n'
+            )
+            with open(bat_path, "w", encoding="gbk") as f:
+                f.write(bat_content)
 
-        self._log("[更新] 下载完成，即将重启...")
-        # 延迟一点退出，让用户看到"下载完成"提示
-        self.root.after(800, self._quit)
+            # DETACHED_PROCESS(0x08) 让 bat 不继承当前控制台（无窗口闪烁），
+            # CREATE_NEW_PROCESS_GROUP 让 bat 与当前进程解耦，当前进程退出后 bat 继续跑。
+            subprocess.Popen(
+                [bat_path],
+                creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
+                close_fds=True,
+            )
+
+            self._log("[更新] 更新脚本已启动，即将退出并自动替换...")
+            self.status_label.configure(text="✓ 更新就绪，正在重启...")
+
+        except Exception as e:
+            self._log(f"[更新] ⚠ 更新脚本启动失败: {e}")
+            self.status_label.configure(text="⚠ 自动更新失败")
+            messagebox.showwarning(
+                "更新异常",
+                f"新版本已下载到:\n{new_exe_path}\n\n"
+                f"但自动替换失败:\n{e}\n\n"
+                f"请手动操作:\n"
+                f"1. 关闭当前程序\n"
+                f"2. 将上述文件覆盖到当前 exe 所在位置\n"
+                f"3. 重新启动",
+            )
+        finally:
+            # 无论 bat 是否启动成功，都延迟退出（让用户看到提示）
+            self.root.after(1500, self._quit)
 
     # ════════════════════════════════════════════
     #  系统托盘

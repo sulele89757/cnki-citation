@@ -115,8 +115,9 @@ def check_update() -> dict:
                     attachments = json.loads(att_resp.read().decode("utf-8"))
                 if isinstance(attachments, list):
                     for a in attachments:
-                        name = (a.get("name") or "").lower()
-                        if name.endswith(".exe"):
+                        name = (a.get("name") or "")
+                        # 精确匹配当前版本的 exe 名（避免下载到另一个平台的 exe）
+                        if name == f"{APP_NAME}.exe" or name.endswith(f"{APP_NAME}.exe"):
                             aid = a.get("id")
                             # 私有仓库的 browser_download_url 不带 token 会 403，
                             # 改用 Gitee API 附件下载接口（带 access_token 可正常鉴权）。
@@ -125,6 +126,17 @@ def check_update() -> dict:
                                 f"/releases/{release_id}/attach_files/{aid}/download"
                                 f"?access_token={GITEE_TOKEN}")
                             break
+                    # 兜底：精确匹配没命中时，仍尝试取第一个 .exe（兼容旧版 Release 只有一个 exe 的情况）
+                    if not download_url:
+                        for a in attachments:
+                            name = (a.get("name") or "").lower()
+                            if name.endswith(".exe"):
+                                aid = a.get("id")
+                                download_url = (
+                                    f"https://gitee.com/api/v5/repos/{GITEE_OWNER}/{GITEE_REPO}"
+                                    f"/releases/{release_id}/attach_files/{aid}/download"
+                                    f"?access_token={GITEE_TOKEN}")
+                                break
             except Exception:
                 pass  # 下载链接拿不到不影响基本检测
 
