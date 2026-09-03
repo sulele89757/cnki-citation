@@ -17,6 +17,20 @@
 - **清理历史**：设置页一键清理历史输出（引文 txt/json 与调试截图），不含浏览器 Profile，可释放多次运行累积的文件
 - **图形界面（v4）**：CustomTkinter，左侧导航 + 三视图（单篇 / 批量 / 设置）+ 底栏（进度 + 日志），亮/暗主题自动适配
 
+## 两个版本
+
+本项目提供两种实现，功能一致，按需选择：
+
+| | Python 版 | Rust 版 |
+|---|---|---|
+| 可执行文件 | `CNKICitationTool.exe` | `CNKICitationTool-rs.exe` |
+| 体积 | ~57MB（含 Python 运行时 + 浏览器） | ~22MB 单文件 |
+| 技术栈 | CustomTkinter + Playwright(headless) | Tauri v2（WebView2）+ headless_chrome |
+| 构建方式 | PyInstaller `--onefile` | `cargo build --release` |
+| 适用场景 | 最大兼容性 / 便于改 Python 逻辑 | 体积小、启动快、原生桌面体验 |
+
+两者均发布到 [Gitee 发行版](https://gitee.com/sulele/cnki-citation/releases)，CI 会同时构建并上传两个 exe。
+
 ## 环境要求
 
 - Windows 10/11
@@ -25,7 +39,9 @@
 
 ## 快速开始（exe 版）
 
-1. 从 [Gitee 发行版](https://gitee.com/sulele/cnki-citation/releases) 下载 `CNKICitationTool.exe`
+1. 从 [Gitee 发行版](https://gitee.com/sulele/cnki-citation/releases) 下载：
+   - `CNKICitationTool.exe`（Python 版，~57MB）
+   - `CNKICitationTool-rs.exe`（Rust 版，~22MB，体积更小）
    （exe 文件名是英文，但软件窗口标题仍为「CNKI 引文工具」，原因见文末「关于 exe 文件名」）
 2. 双击运行（首次可能需手动过一次验证码，之后 Profile 自动复用）
 3. 单篇：输入标题 →「获取引文」；批量：选 Excel →「开始批量处理」
@@ -43,6 +59,17 @@ python cnki_gui.py          # 启动 GUI
 python cnki_citation.py "标题"   # 命令行单篇
 python cnki_citation.py --excel papers.xlsx  # 命令行批量
 ```
+
+### Rust / Tauri 版（从源码构建）
+
+```bash
+# 需要 Rust 稳定版 + 系统 Chrome（headless_chrome 驱动真实 Chrome）
+cd cnki_rust/src-tauri
+cargo build --release
+# 产物：target/release/cnki-citation-rs.exe
+```
+
+> 前端通过 `include_bytes!` 内嵌于二进制，无需单独资源目录；版本号由 CI 在构建时统一注入（同时改写根库与 `src-tauri` 两处 `Cargo.toml` 及 `tauri.conf.json`）。
 
 ## Excel 批量格式
 
@@ -74,11 +101,12 @@ git tag v1.x.x && git push github --tags
 
 > ⚠️ 不要用旧失败 job 的 **Re-run**：它会锁定旧 commit SHA，跑的是修复前的配置。务必发起全新运行（上述 A 或 B）。
 
-触发 `.github/workflows/build.yml`：
+触发 `.github/workflows/build.yml`，同一 tag 下依次构建并发布**两个 exe**：
 
-1. `windows-latest` + PyInstaller 构建 exe（`rm -f` 清残留 spec 后构建，避免 re-run 沿用旧 datas 路径）
-2. 发布到 **GitHub Release**
-3. `sync_gitee.py` 同步到 **Gitee Releases**（国内下载源）
+1. **Python 版**：`windows-latest` + PyInstaller 构建 `CNKICitationTool.exe`（`rm -f` 清残留 spec 后构建，避免 re-run 沿用旧 datas 路径）
+2. **Rust 版**：`cargo build --release`（Tauri 应用）构建 `CNKICitationTool-rs.exe`
+3. 两个 exe 一并发布到 **GitHub Release**
+4. `sync_gitee.py` 同步到 **Gitee Releases**（国内下载源）
 
 Gitee 令牌通过 GitHub Secret `GITEE_TOKEN` 注入。
 
@@ -92,7 +120,7 @@ python build_release.py --dry-run
 python build_release.py
 ```
 
-产物：`dist/CNKICitationTool.exe`（~57MB 单文件）
+产物：`dist/CNKICitationTool.exe`（~57MB 单文件）。Rust 版本地构建见上方「从源码运行 → Rust / Tauri 版」，产物为 `cnki_rust/src-tauri/target/release/cnki-citation-rs.exe`。
 
 > **关于 exe 文件名**
 > GitHub Actions 的 Windows runner 会剥掉文件名中的非 ASCII 字符：`--name` 若含中文，
@@ -103,6 +131,8 @@ python build_release.py
 > 打包时资源均在 `assets/` 子目录，`--add-data` 的源路径与目标目录都必须是
 > `assets/批量引文模板.xlsx;assets` 这种带 `assets/` 前缀的写法（运行时从
 > `sys._MEIPASS/assets` 读取）。
+> Rust 版的内部 crate 名为 `cnki-citation-rs`，CI 构建后重命名为
+> `CNKICitationTool-rs.exe` 以与 Python 版区分，窗口标题同样为「CNKI 引文工具」。
 
 ## 目录结构
 
@@ -120,11 +150,21 @@ cnki_search/
 │   ├── cnki_icon.ico / cnki_icon_dark.ico  # 多分辨率 ICO（16~256，窗口/任务栏用，小帧去「知」加粗框）
 │   └── 批量引文模板.xlsx      # 批量模式 Excel 模板
 ├── .github/workflows/
-│   ├── build.yml             # GitHub Actions CI/CD
+│   ├── build.yml             # GitHub Actions CI/CD（双 exe 构建 + 发布）
 │   └── sync_gitee.py         # 同步 Release 到 Gitee
+├── cnki_rust/                # Rust / Tauri 原生版（cnki-citation-rs）
+│   ├── Cargo.toml            # 核心库 cnki_citation_rs（抓取引擎）
+│   ├── src/                  # 库源码：behavior/citation/excel/stealth/update/version…
+│   └── src-tauri/            # Tauri 应用（依赖上方库 + browser feature）
+│       ├── Cargo.toml
+│       ├── tauri.conf.json
+│       ├── src/              # commands.rs / main.rs（WebView 启动 + 命令注册）
+│       ├── frontend/         # 内嵌前端（HTML/JS/CSS，编译时 include_bytes! 打入 exe）
+│       └── icons/            # icon.ico（嵌 exe）+ icon.png
 ├── README.md
 └── dist/                     # 构建产物
-    └── CNKICitationTool.exe
+    ├── CNKICitationTool.exe      # Python 版
+    └── CNKICitationTool-rs.exe   # Rust 版
 ```
 
 ## 常见问题
