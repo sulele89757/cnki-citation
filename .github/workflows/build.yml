@@ -91,8 +91,9 @@ jobs:
           VER="${{ steps.ver.outputs.version }}"
           # 更新 tauri.conf.json version
           python -c "import json; p='tauri.conf.json'; c=json.load(open(p,encoding='utf-8')); c['version']='${VER}'; json.dump(c,open(p,'w',encoding='utf-8'),indent=2,ensure_ascii=False); print('tauri.conf.json version -> ${VER}')"
-          # 更新 Cargo.toml version（如需要）
-          sed -i "s/^version = .*/version = \"${VER}\"/" Cargo.toml 2>/dev/null || true
+          # 更新 Cargo.toml version（两处：src-tauri 应用 + 根库）
+          sed -i "s/^version = .*/version = \"${VER}\"/" Cargo.toml
+          sed -i "s/^version = .*/version = \"${VER}\"/" ../Cargo.toml
           echo "Rust version -> $VER"
 
       - name: Build Rust exe (Tauri)
