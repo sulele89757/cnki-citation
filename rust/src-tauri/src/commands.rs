@@ -2,6 +2,9 @@
 
 use std::path::PathBuf;
 use std::process::Command;
+
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 use std::sync::Mutex;
 
 use serde::Serialize;
@@ -508,8 +511,11 @@ pub fn system_theme(app: AppHandle) -> String {
 
 #[cfg(windows)]
 fn open_in_explorer(path: &str) -> Result<(), String> {
-    std::process::Command::new("cmd")
-        .args(["/c", "start", "", path])
+    // 直接调 explorer.exe，避免 `cmd /c start` 弹出一闪而过的控制台窗口；
+    // 加 CREATE_NO_WINDOW 确保无残留窗口。
+    std::process::Command::new("explorer")
+        .arg(path)
+        .creation_flags(0x08000000)
         .spawn()
         .map(|_| ())
         .map_err(|e| e.to_string())

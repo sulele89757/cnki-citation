@@ -8,8 +8,30 @@
 use std::ffi::OsStr;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::thread::sleep;
 use std::time::Duration;
+
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
+/// 创建子进程命令。
+///
+/// Windows 下附加 `CREATE_NO_WINDOW (0x08000000)`：父进程是 GUI 子系统（Tauri），
+/// 若不加此标志，每次 spawn 控制台子程序（如 `reg`/`tar`）都会让 Windows 分配一个
+/// 一闪而过的 cmd 控制台窗口——点击「开始」时 `find_chrome` 连查 6 次注册表就会造成
+/// 「疯狂弹一堆 cmd 窗口」的现象。加该标志后子进程在后台静默运行，不再弹窗。
+#[cfg(windows)]
+fn quiet_cmd(program: &str) -> Command {
+    let mut c = Command::new(program);
+    c.creation_flags(0x08000000);
+    c
+}
+
+#[cfg(not(windows))]
+fn quiet_cmd(program: &str) -> Command {
+    Command::new(program)
+}
 
 use headless_chrome::browser::tab::Tab;
 use headless_chrome::protocol::cdp::Page;
@@ -87,7 +109,7 @@ fn find_chrome() -> Option<PathBuf> {
     ];
     for (root, key) in reg_keys {
         let path = format!(r"{root}\{key}");
-        let out = std::process::Command::new("reg")
+        let out = quiet_cmd("reg")
             .arg("query")
             .arg(&path)
             .arg("/ve")
@@ -175,7 +197,7 @@ fn ensure_fallback_chromium(
     on_log("下载完成，正在解压（约需 1-2 分钟）...");
 
     // 用 Windows 自带 bsdtar（Win10 1803+ 均有）解压，产出 chrome-win64/
-    let status = std::process::Command::new("tar")
+    let status = quiet_cmd("tar")
         .arg("-xf")
         .arg(&zip)
         .arg("-C")
