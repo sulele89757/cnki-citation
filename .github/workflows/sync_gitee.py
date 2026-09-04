@@ -8,22 +8,19 @@ sync_gitee.py — 把本地构建好的 exe 同步到 Gitee Releases（供 GitHu
   VERSION       版本号（形如 1.0.1，不含 v 前缀）
   待上传文件（可任选其一或多个）：
     EXE_PATH              单文件路径
-    EXE_PATH_PYTHON       Python 版 exe
+    EXE_PATH_RS           Tauri NSIS 安装包（CNKI-rs-installer.exe，embedBootstrapper）
+    EXE_PATH_PYTHON       Python 版 exe（现已不再构建，仅保留兼容）
     EXE_PATH_RUST         Rust 裸 exe（向后兼容）
-    EXE_PATH_RS_LITE      Tauri 轻量 NSIS 安装包（embedBootstrapper）
-    EXE_PATH_RS_OFFLINE   Tauri 离线 NSIS 安装包（offlineInstaller，超大自动切分卷）
   NOTES         发布说明（可选）
   BRANCH        目标分支（默认 main）
 
 流程：
   POST /releases 建 Release（tag 已存在则 GET /releases/tags/{tag} 复用）
   → multipart 上传 exe 到 /releases/{id}/attach_files
-Gitee 附件单文件上限 100MB → EXE_PATH_RS_OFFLINE（~150MB 离线包）自动切成
-≤95MB 分卷，配合 Rust 引导器（CNKICitationTool-rs-offline.exe，用户双击后自动
-拼回并启动安装器）一起上传；原始大文件不上传。
+Gitee 附件单文件上限 100MB；Rust 安装包（CNKI-rs-installer.exe，~6.6MB）远小于上限，
+直接整包上传即可（不再提供内置 WebView2 的离线版，故无需分卷与自合并引导器）。
 """
 import json
-import math
 import os
 import sys
 import time
@@ -65,14 +62,19 @@ def create_release(owner, repo, token, version, notes, branch):
         data, _ = _api_post(url, payload, token)
         return data["id"]
     except RuntimeError as e:
-        if "already exist" in str(e) or "exists" in str(e):
+        # 创建失败（tag 已存在 / 名称被占用 / 其它）——尝试按 tag 复用已有 Release。
+        # Gitee 重复报错可能是中文（"已存在"），无法靠英文子串命中，故统一走 GET 兜底。
+        print(f"[sync] 创建 Release 失败（{e}），尝试按 tag 复用已有 Release ...", flush=True)
+        try:
             get_url = f"https://gitee.com/api/v5/repos/{owner}/{repo}/releases/tags/{tag}"
             req = urllib.request.Request(
                 get_url + "?access_token=" + token,
                 headers={"User-Agent": "CNKI-Sync"})
             with urllib.request.urlopen(req, timeout=20) as resp:
                 return json.loads(resp.read().decode("utf-8"))["id"]
-        raise
+        except Exception as e2:
+            raise RuntimeError(
+                f"无法创建或复用 Release v{version}: 创建失败={e} | 复用失败={e2}")
 
 
 def _list_assets(owner, repo, token, release_id):
@@ -174,46 +176,6 @@ def upload_asset(owner, repo, token, release_id, exe_path, max_retries=3):
     raise RuntimeError(f"上传 exe 失败（已重试 {max_retries} 次）: {last_err}")
 
 
-# Gitee 附件单文件上限 100MB；预留余量，分卷大小上限 95MB
-MAX_PART = 95 * 1024 * 1024
-
-# Rust 自合并引导器文件名（cnki_rust/offline_join.rs 编译产物，须与分卷同目录）
-OFFLINE_LAUNCHER = "CNKICitationTool-rs-offline.exe"
-
-
-def prepare_offline_join(offline_exe):
-    """把 >100MB 的 offline 安装包切成 ≤MAX_PART 分卷，配合 Rust 引导器发布。
-
-    产物命名与 cnki_rust/offline_join.rs 的约定严格一致：
-      <dir>/CNKICitationTool-rs-offline.exe      引导器（用户双击这个，自动拼回并启动）
-      <dir>/CNKICitationTool-rs-offline.p2..pn   数据分卷（每份 ≤95MB，p1 即引导器）
-    返回待上传 [引导器] + 分卷；offline_exe 本身不上传。
-    """
-    src_dir = os.path.dirname(os.path.abspath(offline_exe))
-    launcher = os.path.join(src_dir, OFFLINE_LAUNCHER)
-    if not os.path.exists(launcher):
-        raise SystemExit(
-            f"未找到引导器 {launcher}（需先用 rustc 编译 cnki_rust/offline_join.rs 到同目录）")
-    total = os.path.getsize(offline_exe)
-    n = math.ceil(total / MAX_PART)  # 数据分卷数
-    chunk = math.ceil(total / n)
-    stem = OFFLINE_LAUNCHER.rsplit(".", 1)[0]
-    parts = []
-    with open(offline_exe, "rb") as src:
-        for i in range(1, n + 1):
-            part_path = os.path.join(src_dir, f"{stem}.p{i + 1}")  # .p2 .. .p{n+1}
-            with open(part_path, "wb") as dst:
-                remaining = chunk if i < n else total - chunk * (i - 1)
-                while remaining > 0:
-                    b = src.read(min(1 << 20, remaining))
-                    if not b:
-                        break
-                    dst.write(b)
-                    remaining -= len(b)
-            parts.append(part_path)
-    return [launcher] + parts
-
-
 def main():
     # Windows CI 控制台默认编码可能不支持中文，强制 UTF-8
     if sys.stdout and hasattr(sys.stdout, "reconfigure"):
@@ -234,37 +196,25 @@ def main():
     notes = os.environ.get("NOTES", "")
     branch = os.environ.get("BRANCH", "main")
 
-    # EXE_PATH_RS_OFFLINE 的 ~150MB 离线包单独处理（切分卷 + Rust 引导器发布）；
-    # 其余（Python/lite/RUST 裸 exe）走直传。
-    offline = os.environ.get("EXE_PATH_RS_OFFLINE", "").strip()
+    # 收集待上传的 exe：EXE_PATH（单文件）优先；其次 EXE_PATH_RS；其余兼容键可选。
     exe_paths = []
     single = os.environ.get("EXE_PATH", "").strip()
     if single:
         exe_paths.append(single)
-    for env_key in ("EXE_PATH_PYTHON", "EXE_PATH_RUST", "EXE_PATH_RS_LITE"):
+    for env_key in ("EXE_PATH_RS", "EXE_PATH_PYTHON", "EXE_PATH_RUST"):
         p = os.environ.get(env_key, "").strip()
         if p:
             exe_paths.append(p)
 
     missing = [n for n, v in (("GITEE_OWNER", owner), ("GITEE_REPO", repo),
                               ("GITEE_TOKEN", token), ("VERSION", version)) if not v]
-    if not exe_paths and not offline:
-        missing.append("EXE_PATH 或 EXE_PATH_PYTHON/EXE_PATH_RUST/EXE_PATH_RS_LITE/EXE_PATH_RS_OFFLINE")
+    if not exe_paths:
+        missing.append("EXE_PATH 或 EXE_PATH_RS")
     if missing:
         raise SystemExit("缺少环境变量: " + ", ".join(missing))
-    for p in exe_paths + ([offline] if offline else []):
+    for p in exe_paths:
         if not os.path.exists(p):
             raise SystemExit(f"未找到 exe: {p}")
-
-    # offline 安装包 ~150MB > Gitee 100MB 上限 → 引导器 + 分卷，原文件不上传。
-    uploads = []
-    if offline:
-        joined = prepare_offline_join(offline)
-        print(f"[sync] offline 安装包 ({os.path.getsize(offline)//1024//1024}MB) 超 Gitee 100MB "
-              f"→ 引导器 + {len(joined)-1} 个分卷", flush=True)
-        uploads.extend(joined)
-    uploads.extend(exe_paths)
-    exe_paths = uploads
 
     print(f"[sync] v{version}  owner={owner} repo={repo}", flush=True)
     print(f"[sync] 待上传 {len(exe_paths)} 个文件:", flush=True)

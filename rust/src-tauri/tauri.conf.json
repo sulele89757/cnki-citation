@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "CNKI Citation Tool",
+  "productName": "CNKI",
   "version": "1.0.4",
   "identifier": "com.cnki.citation",
   "build": {
@@ -39,7 +39,7 @@
     ],
     "windows": {
       "webviewInstallMode": {
-        "type": "offlineInstaller"
+        "type": "embedBootstrapper"
       },
       "nsis": null
     }

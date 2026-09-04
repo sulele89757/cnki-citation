@@ -2,6 +2,8 @@
 
 按论文标题在 **中国知网（CNKI）** 搜索论文，一键获取 **GB/T 7714-2025** 格式引文。支持单篇与 Excel 批量，自带拟人化反爬策略，可打包为单文件 exe。
 
+> **软件名称统一为 `CNKI`**：安装目录、桌面快捷方式、开始菜单项均命名为 `CNKI`；窗口标题仍为中文「CNKI 引文工具」。源文件保留 `-py` / `-rs` 后缀（如 `cnki_citation.py`、`cnki-citation-rs`），便于区分语言与版本。
+
 ## 功能特性
 
 - **单篇获取**：输入标题 → 自动搜索 → 界面内联显示引文 + 一键复制
@@ -19,40 +21,58 @@
 
 ## 两个版本
 
-本项目提供两种实现，功能一致，按需选择：
+仓库内含 Python 与 Rust 两种实现，**功能一致**；但 **Python 版仅作为参考代码保留，不再参与 CI 构建与发布**，实际可下载使用的只有 Rust 版安装包。
 
-| | Python 版 | Rust 版 |
+| | Python 版（参考代码） | Rust 版（推荐 · 实际发布） |
 |---|---|---|
-| 可执行文件 | `CNKICitationTool.exe` | `CNKICitationTool-rs.exe` |
-| 体积 | ~57MB（含 Python 运行时 + 浏览器） | ~22MB 单文件 |
+| 可执行文件 | `python/cnki_gui.py`（源码，需自装依赖运行） | `CNKI-rs-installer.exe`（NSIS 安装包） |
+| 体积 | 取决于运行环境 | 安装包 ~6.6MB（安装时联网拉取 WebView2） |
 | 技术栈 | CustomTkinter + Playwright(headless) | Tauri v2（WebView2）+ headless_chrome |
-| 构建方式 | PyInstaller `--onefile` | `cargo build --release` |
-| 适用场景 | 最大兼容性 / 便于改 Python 逻辑 | 体积小、启动快、原生桌面体验 |
+| 构建方式 | PyInstaller `--onefile`（已停用） | `cargo tauri build`（CI 自动） |
+| 适用场景 | 阅读 / 改造 Python 逻辑 | 体积小、启动快、原生桌面体验 |
 
-两者均发布到 [Gitee 发行版](https://gitee.com/sulele/cnki-citation/releases)，CI 会同时构建并上传两个 exe。
+仅 Rust 版发布到 [Gitee 发行版](https://gitee.com/sulele/cnki-citation/releases)。
+
+> **不再提供内置 WebView2 的离线安装包**（原 255MB 版）。改为安装包内置引导器、安装时自动下载 WebView2（详见下方「WebView2 运行环境」），安装包体积降至 ~6.6MB，也更利于 Gitee 分发。
 
 ## 环境要求
 
 - Windows 10/11
+- **WebView2 Runtime**：绝大多数系统已自带；安装包会在安装时自动联网下载安装（见下方链接，亦可提前手动预装）
 - Google Chrome（推荐，指纹最真实）；未安装时回退 Playwright 内置 Chromium
-- Python 3.12+（GUI 需系统 Python 自带 `tkinter`）
+- Python 3.12+（仅 Python 版 GUI 需要系统 Python 自带 `tkinter`）
 
 ## 快速开始（exe 版）
 
-1. 从 [Gitee 发行版](https://gitee.com/sulele/cnki-citation/releases) 下载：
-   - `CNKICitationTool.exe`（Python 版，~57MB）
-   - `CNKICitationTool-rs.exe`（Rust 版，~22MB，体积更小）
-   （exe 文件名是英文，但软件窗口标题仍为「CNKI 引文工具」，原因见文末「关于 exe 文件名」）
-2. 双击运行（首次可能需手动过一次验证码，之后 Profile 自动复用）
-3. 单篇：输入标题 →「获取引文」；批量：选 Excel →「开始批量处理」
+1. 从 [Gitee 发行版](https://gitee.com/sulele/cnki-citation/releases) 下载 `CNKI-rs-installer.exe`（Rust 版，~6.6MB）。
+2. 双击 `CNKI-rs-installer.exe` 安装，桌面与开始菜单会生成 **`CNKI`** 快捷方式（安装目录为 `%LOCALAPPDATA%\CNKI`）。
+3. 首次运行若提示缺少 WebView2，按提示联网安装即可（或预先装好，见下方链接）。
+4. 单篇：输入标题 →「获取引文」；批量：选 Excel →「开始批量处理」。
 
 数据目录：`C:\Users\<用户名>\.cnki_citation\`（跨运行持久化）
 
+> Python 版未发布 exe，如需体验请见下方「从源码运行（Python 版 · 参考）」。
+
+## WebView2 运行环境
+
+Rust 安装包采用 `embedBootstrapper` 模式：**安装过程中自动从微软 CDN 下载并安装 WebView2 Runtime**，因此安装包本身仅 ~6.6MB，无需内置 255MB 运行时。
+
+若目标机网络受限、或希望提前预装，可手动下载官方 WebView2 Runtime：
+
+- 官方下载页：<https://developer.microsoft.com/zh-cn/microsoft-edge/webview2/>
+- 独立安装包（Evergreen Standalone，可离线安装）：<https://go.microsoft.com/fwlink/p/?LinkId=2124701>
+- 引导器（小体积，安装时联网）：<https://go.microsoft.com/fwlink/p/?LinkId=2124703>
+
+> 绝大多数 Win10/11 已自带 WebView2，双击安装包即可直接使用，无需手动处理。
+
 ## 从源码运行
 
+### Python 版（仅参考，不构建发布）
+
 ```bash
-python -m venv venv
-venv\Scripts\activate
+cd python
+python -m venv ../venv
+../venv/Scripts/activate
 pip install -r requirements.txt
 
 python cnki_gui.py          # 启动 GUI
@@ -60,16 +80,21 @@ python cnki_citation.py "标题"   # 命令行单篇
 python cnki_citation.py --excel papers.xlsx  # 命令行批量
 ```
 
+> Python 版依赖系统浏览器与 `tkinter`，仅用于阅读与改造逻辑；正式分发一律使用下方 Rust 版。
+
 ### Rust / Tauri 版（从源码构建）
 
 ```bash
 # 需要 Rust 稳定版 + 系统 Chrome（headless_chrome 驱动真实 Chrome）
-cd cnki_rust/src-tauri
-cargo build --release
-# 产物：target/release/cnki-citation-rs.exe
+cd rust/src-tauri
+cargo tauri build
+# 产物：target/release/bundle/nsis/CNKI_1.0.4_x64-setup.exe
+# 复制为 ../dist/CNKI-rs-installer.exe 即可分发（bash rust/build_both.sh 已自动完成）
 ```
 
-> 前端通过 `include_bytes!` 内嵌于二进制，无需单独资源目录；版本号由 CI 在构建时统一注入（同时改写根库与 `src-tauri` 两处 `Cargo.toml` 及 `tauri.conf.json`）。
+> 前端通过 `include_bytes!` 内嵌于二进制，无需单独资源目录；`tauri.conf.json` 中
+> `productName` 已设为 `CNKI`，故安装目录与快捷方式均为 `CNKI`；`webviewInstallMode`
+> 为 `embedBootstrapper`（安装时联网拉取 WebView2）。版本号由 CI 在构建时统一注入。
 
 ## Excel 批量格式
 
@@ -101,70 +126,66 @@ git tag v1.x.x && git push github --tags
 
 > ⚠️ 不要用旧失败 job 的 **Re-run**：它会锁定旧 commit SHA，跑的是修复前的配置。务必发起全新运行（上述 A 或 B）。
 
-触发 `.github/workflows/build.yml`，同一 tag 下依次构建并发布**两个 exe**：
+触发 `.github/workflows/build.yml`，构建并发布：
 
-1. **Python 版**：`windows-latest` + PyInstaller 构建 `CNKICitationTool.exe`（`rm -f` 清残留 spec 后构建，避免 re-run 沿用旧 datas 路径）
-2. **Rust 版**：`cargo build --release`（Tauri 应用）构建 `CNKICitationTool-rs.exe`
-3. 两个 exe 一并发布到 **GitHub Release**
-4. `sync_gitee.py` 同步到 **Gitee Releases**（国内下载源）
+1. **Rust 版**：`windows-latest` + `cargo tauri build`（embedBootstrapper）→ `CNKI-rs-installer.exe`
+2. 发布到 **GitHub Release**
+3. `sync_gitee.py` 同步到 **Gitee Releases**（国内下载源）
+
+> Python 版不再参与 CI 构建（仅保留源码作为参考），因此 Gitee 上只会看到 Rust 安装包一个附件。
 
 Gitee 令牌通过 GitHub Secret `GITEE_TOKEN` 注入。
 
 ## 本地构建
 
 ```bash
-# 用 build_release.py（只构建，不上传）
-python build_release.py --dry-run
-
-# 构建并发布到 Gitee
-python build_release.py
+# Rust 版（仅构建，不上传）：bash rust/build_both.sh
+# 产物：rust/dist/CNKI-rs-installer.exe（embedBootstrapper，~6.6MB）
 ```
 
-产物：`dist/CNKICitationTool.exe`（~57MB 单文件）。Rust 版本地构建见上方「从源码运行 → Rust / Tauri 版」，产物为 `cnki_rust/src-tauri/target/release/cnki-citation-rs.exe`。
+> `build_release.py`（原 Python 版本地构建脚本）已删除；Python 版保留源码在 `python/`，如需自跑见上方「从源码运行 → Python 版（仅参考）」。
 
-> **关于 exe 文件名**
-> GitHub Actions 的 Windows runner 会剥掉文件名中的非 ASCII 字符：`--name` 若含中文，
-> 构建出的 exe 会被压成 `CNKI.exe`。因此内部标识统一固定为英文
-> `APP_NAME = "CNKICitationTool"`（`cnki_gui.py`），用于 exe 文件名、托盘图标名、
-> 自更新临时文件名；中文仅保留在用户界面文案（窗口标题「CNKI 引文工具」、品牌标签、
-> 提示语、托盘 tooltip），不影响任何功能。
-> 打包时资源均在 `assets/` 子目录，`--add-data` 的源路径与目标目录都必须是
-> `assets/批量引文模板.xlsx;assets` 这种带 `assets/` 前缀的写法（运行时从
-> `sys._MEIPASS/assets` 读取）。
-> Rust 版的内部 crate 名为 `cnki-citation-rs`，CI 构建后重命名为
-> `CNKICitationTool-rs.exe` 以与 Python 版区分，窗口标题同样为「CNKI 引文工具」。
+> **关于软件名 / 目录 / exe 文件名**
+> 软件名称统一为 **`CNKI`**（纯 ASCII，GitHub Actions 的 Windows runner 不会剥离字符）。
+> 源文件保留 `-py` / `-rs` 后缀以区分语言与版本：Python 源码置于 `python/`（含 `cnki_citation.py` / `cnki_gui.py`），
+> Rust crate 名 `cnki-citation-rs`（置于 `rust/`）。Rust 安装包以 `productName = "CNKI"` 构建，故安装目录与
+> 桌面 / 开始菜单快捷方式均为 `CNKI`；窗口标题仍为中文「CNKI 引文工具」。
+> Python 版打包（仅参考）资源统一在 `python/assets/` 子目录，`--add-data` 的源路径与目标目录都必须是
+> `assets/批量引文模板.xlsx;assets` 这种带 `assets/` 前缀的写法（运行时从 `sys._MEIPASS/assets` 读取）。
 
 ## 目录结构
 
 ```
 cnki_search/
-├── cnki_citation.py          # 核心：搜索、反爬、引文提取、更新检测
-├── cnki_gui.py               # GUI（v4 左导航三视图 + 托盘 + 自更新）
-├── clear_icon_cache.bat      # 一键清理 Windows 图标缓存
-├── requirements.txt          # 依赖清单
-├── assets/                   # 静态资源（图标 + 模板，打包进 exe），所有资源统一放此目录
-│   ├── app.ico               # 程序/任务栏窗口图标（9 帧多尺寸）
-│   ├── generate_icons.py     # 图标生成器：按尺寸分级绘制，避免小帧下采样发糊
-│   ├── cnki_icon.png/.svg    # 亮色主题图标（白底 + 橙色外框 + 黑色手写「知」，不透明）
-│   ├── cnki_icon_dark.png/.svg  # 深色主题图标（深灰底 + 橙色外框 + 白色手写「知」，不透明）
-│   ├── cnki_icon.ico / cnki_icon_dark.ico  # 多分辨率 ICO（16~256，窗口/任务栏用，小帧去「知」加粗框）
-│   └── 批量引文模板.xlsx      # 批量模式 Excel 模板
-├── .github/workflows/
-│   ├── build.yml             # GitHub Actions CI/CD（双 exe 构建 + 发布）
-│   └── sync_gitee.py         # 同步 Release 到 Gitee
-├── cnki_rust/                # Rust / Tauri 原生版（cnki-citation-rs）
+├── python/                   # Python 版（参考代码，不构建发布）
+│   ├── cnki_citation.py      # 核心：搜索、反爬、引文提取、更新检测
+│   ├── cnki_gui.py           # GUI（v4 左导航三视图 + 托盘 + 自更新）
+│   ├── clear_icon_cache.bat  # 一键清理 Windows 图标缓存
+│   ├── CNKICitationTool.spec # PyInstaller 规格（参考）
+│   ├── requirements.txt      # 依赖清单
+│   └── assets/               # 静态资源（图标 + 模板），所有资源统一放此目录
+│       ├── app.ico           # 程序/任务栏窗口图标（9 帧多尺寸）
+│       ├── generate_icons.py # 图标生成器：按尺寸分级绘制，避免小帧下采样发糊
+│       ├── cnki_icon.png/.svg    # 亮色主题图标（白底 + 橙色外框 + 黑色手写「知」）
+│       ├── cnki_icon_dark.png/.svg  # 深色主题图标（深灰底 + 橙色外框 + 白色手写「知」）
+│       ├── cnki_icon.ico / cnki_icon_dark.ico  # 多分辨率 ICO（16~256）
+│       └── 批量引文模板.xlsx  # 批量模式 Excel 模板
+├── rust/                     # Rust / Tauri 原生版（cnki-citation-rs，实际发布）
 │   ├── Cargo.toml            # 核心库 cnki_citation_rs（抓取引擎）
+│   ├── build_both.sh         # 本地一键构建 embedBootstrapper 安装包
 │   ├── src/                  # 库源码：behavior/citation/excel/stealth/update/version…
+│   ├── dist/CNKI-rs-installer.exe  # 本地构建产物（embedBootstrapper，~6.6MB）
 │   └── src-tauri/            # Tauri 应用（依赖上方库 + browser feature）
 │       ├── Cargo.toml
-│       ├── tauri.conf.json
+│       ├── tauri.conf.json   # productName=CNKI，webviewInstallMode=embedBootstrapper
 │       ├── src/              # commands.rs / main.rs（WebView 启动 + 命令注册）
 │       ├── frontend/         # 内嵌前端（HTML/JS/CSS，编译时 include_bytes! 打入 exe）
 │       └── icons/            # icon.ico（嵌 exe）+ icon.png
-├── README.md
-└── dist/                     # 构建产物
-    ├── CNKICitationTool.exe      # Python 版
-    └── CNKICitationTool-rs.exe   # Rust 版
+├── .github/workflows/
+│   ├── build.yml             # GitHub Actions CI/CD（仅 Rust 安装包构建与发布）
+│   └── sync_gitee.py         # 同步 Release 到 Gitee
+├── venv/                     # 本地 Python 虚拟环境（git 忽略）
+└── README.md
 ```
 
 ## 常见问题
@@ -172,6 +193,8 @@ cnki_search/
 **首次需要验证码？** 正常。手动过一次后 Profile 复用登录态，后续自动通过。
 
 **点 X 程序退了？** 设计行为：X 最小化到托盘。彻底退出用托盘右键「退出」。
+
+**安装提示缺少 WebView2？** 联网状态下安装包会自动下载安装；若网络受限，请先按「WebView2 运行环境」手动预装独立安装包。
 
 **更新失败 403？** 旧版（v1.0.0~v1.0.3）内置的下载链接不支持私有仓库。手动下载 v1.0.4+ 覆盖即可。
 

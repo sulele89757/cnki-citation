@@ -60,10 +60,11 @@ impl Updater {
         let has = version::norm_ver(&latest) > version::norm_ver(&self.current);
 
         let mut download_url = String::new();
-        // 优先精确匹配本工具（Rust 版）的 exe 名；未命中则退化为首个 .exe，
-        // 兼容早期只有单一 exe 的发布。一个 release 挂了 Python / Rust 两个
-        // exe，若不精确匹配可能下载错版本（对标 Python 版同名 bug 修复）。
-        let want = "cnkicitationtool-rs.exe";
+        // 优先精确匹配本工具（Rust 版）的发布物名；未命中则退化为首个 .exe，
+        // 兼容早期只有单一 exe 的发布。当前发布物为 NSIS 安装包
+        // `CNKI-rs-installer.exe`（embedBootstrapper，静默安装时用 /S 覆盖
+        // %LOCALAPPDATA%\CNKI），故按此名精确匹配，避免误下其它附件。
+        let want = "cnki-rs-installer.exe";
         if let (Some(rid), false) = (release.id, self.token.is_empty()) {
             let att_url = format!(
                 "https://gitee.com/api/v5/repos/{}/{}/releases/{}/attach_files",

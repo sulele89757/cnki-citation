@@ -224,32 +224,33 @@ pub fn perform_update(app: AppHandle, download_url: String) -> Result<(), String
     Ok(())
 }
 
-/// 实际执行：下载 → 写 bat → 以 DETACHED 方式启动 bat → 退出当前进程。
+/// 实际执行：下载 NSIS 安装包 → 写 bat → 以 DETACHED 方式启动 bat → 退出当前进程。
 ///
-/// 进程退出后 exe 文件解锁，bat 才能 `move /Y` 覆盖成功。
+/// 进程退出后 exe 文件解锁，bat 再以静默方式运行 `CNKI-rs-installer.exe /S`，
+/// 由 NSIS 负责覆盖 `%LOCALAPPDATA%\CNKI`（含正在运行的 exe），装完自动重启。
 fn do_update(app: &AppHandle, download_url: &str) -> Result<(), String> {
-    let _ = app.emit("log", "[更新] 正在下载新版本（约 22MB）...");
+    let _ = app.emit("log", "[更新] 正在下载新版本安装包（约 6.6MB）...");
 
     let tmp = std::env::temp_dir();
-    let new_exe = tmp.join(format!("{APP_NAME}_new.exe"));
-    // 清理上一次可能残留的临时文件，避免 move 到旧文件
-    let _ = std::fs::remove_file(&new_exe);
+    let installer = tmp.join(format!("{APP_NAME}_installer.exe"));
+    // 清理上一次可能残留的临时文件
+    let _ = std::fs::remove_file(&installer);
 
-    cnki_citation_rs::update::download(download_url, &new_exe)?;
+    cnki_citation_rs::update::download(download_url, &installer)?;
 
-    let _ = app.emit("log", "[更新] 下载完成，正在准备替换...");
+    let _ = app.emit("log", "[更新] 下载完成，正在准备更新...");
 
     let current = std::env::current_exe().map_err(|e| e.to_string())?;
     let bat = tmp.join(format!("{APP_NAME}_update.bat"));
     std::fs::write(&bat, UPDATE_BAT).map_err(|e| format!("写入更新脚本失败：{e}"))?;
 
     // DETACHED_PROCESS(0x08) + CREATE_NEW_PROCESS_GROUP(0x200)：
-    // bat 与当前进程解耦，当前进程退出后 bat 仍继续跑（负责替换 + 重启）。
+    // bat 与当前进程解耦，当前进程退出后 bat 仍继续跑（静默重装 + 重启）。
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
         Command::new(&bat)
-            .arg(&new_exe)
+            .arg(&installer)
             .arg(&current)
             .creation_flags(0x08 | 0x200)
             .spawn()
@@ -257,11 +258,11 @@ fn do_update(app: &AppHandle, download_url: &str) -> Result<(), String> {
     }
     #[cfg(not(windows))]
     {
-        // 非 Windows（开发/跨平台兜底）：直接覆盖后启动
-        let _ = std::fs::rename(&new_exe, &current);
-        Command::new(&current)
+        // 非 Windows（开发/跨平台兜底）：直接静默运行安装包
+        Command::new(&installer)
+            .arg("/S")
             .spawn()
-            .map_err(|e| format!("启动新版失败：{e}"))?;
+            .map_err(|e| format!("启动安装包失败：{e}"))?;
         let _ = std::fs::remove_file(&bat);
     }
 
@@ -273,27 +274,14 @@ fn do_update(app: &AppHandle, download_url: &str) -> Result<(), String> {
 
 /// 更新 bat（纯 ASCII，路径通过 `%1`/`%2` 传入，规避 GBK 编码与中文路径问题）。
 ///
-/// - `%1` = 下载到 temp 的新 exe；`%2` = 当前正在运行的 exe。
-/// - 每 2 秒尝试 `move /Y`，直到源文件不存在（即移动成功）或重试 30 次（60s 超时）。
-/// - 仅当移动成功才 `cd` 到安装目录并 `start` 新 exe，最后 `del` 自身。
+/// - `%1` = 下载到 temp 的 NSIS 安装包（`CNKI-rs-installer.exe`）；`%2` = 当前 exe 路径。
+/// - `start /wait` 静默运行安装包（`/S`），由 NSIS 覆盖 `%LOCALAPPDATA%\CNKI`；
+///   安装完成后（沿用先前记录的安装目录）再 `start` 同路径的新 exe，最后 `del` 自身。
 const UPDATE_BAT: &str = "@echo off\r\n\
-set \"SRC=%~1\"\r\n\
-set \"DST=%~2\"\r\n\
-set \"OK=0\"\r\n\
-for /L %%i in (1,1,30) do (\r\n\
-  move /Y \"%SRC%\" \"%DST%\" >nul 2>&1\r\n\
-  if not exist \"%SRC%\" (\r\n\
-    set \"OK=1\"\r\n\
-    goto :done\r\n\
-  )\r\n\
-  timeout /t 2 >nul\r\n\
-)\r\n\
-:done\r\n\
-if \"%OK%\"==\"1\" (\r\n\
-  for %%I in (\"%DST%\") do set \"DSTDIR=%%~dpI\"\r\n\
-  cd /d \"%DSTDIR%\"\r\n\
-  start \"\" \"%DST%\"\r\n\
-)\r\n\
+set \"INST=%~1\"\r\n\
+set \"CUR=%~2\"\r\n\
+start /wait \"\" \"%INST%\" /S\r\n\
+start \"\" \"%CUR%\"\r\n\
 del \"%~f0\"\r\n";
 
 // ════════════════════════════════════════════

@@ -343,7 +343,7 @@
         const ok = await dialog.confirm(
           "当前版本：v" + APP_VER + "\n最新版本：" + res.latest +
             (res.notes ? "\n\n更新说明：\n" + res.notes : "") +
-            "\n\n是否立即下载并更新？（下载约 22MB，会自动重启）",
+            "\n\n是否立即下载并更新？（下载约 6.6MB，会自动重启）",
           { title: "发现新版本", okLabel: "立即更新", cancelLabel: "稍后" }
         );
         if (ok) {
@@ -374,7 +374,7 @@
       return;
     }
     setStatus("⚙ 正在下载更新...", "var(--warning)");
-    appendLog("[更新] 正在下载新版本（约 22MB），请勿关闭窗口...");
+    appendLog("[更新] 正在下载新版本（约 6.6MB），请勿关闭窗口...");
     try {
       await invoke("perform_update", { downloadUrl });
       setStatus("⚙ 更新中，即将重启...", "var(--warning)");
