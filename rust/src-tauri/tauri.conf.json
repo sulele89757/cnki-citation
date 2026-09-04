@@ -41,7 +41,11 @@
       "webviewInstallMode": {
         "type": "embedBootstrapper"
       },
-      "nsis": null
+      "nsis": {
+        "languages": [
+          "SimpChinese"
+        ]
+      }
     }
   }
 }
