@@ -151,7 +151,7 @@ Gitee 令牌通过 GitHub Secret `GITEE_TOKEN` 注入。
 > 软件名称统一为 **`CNKI`**（纯 ASCII，GitHub Actions 的 Windows runner 不会剥离字符）。
 > 源文件保留 `-py` / `-rs` 后缀以区分语言与版本：Python 源码置于 `python/`（含 `cnki_citation.py` / `cnki_gui.py`），
 > Rust crate 名 `cnki-citation-rs`（置于 `rust/`）。Rust 安装包以 `productName = "CNKI"` 构建并**沿用 NSIS 默认命名**
-> `CNKI_<版本>_x64-setup.exe`（不再自定义 `-rs-installer` 之类名字；Python 已不发布，无需区分后缀），
+> `CNKI_<版本>_x64-setup.exe`（不再自定义产物名；Python 已不发布，无需区分语言后缀），
 > 安装目录与桌面 / 开始菜单快捷方式均为 `CNKI`；窗口标题仍为中文「CNKI 引文工具」。
 > Python 版打包（仅参考）资源统一在 `python/assets/` 子目录，`--add-data` 的源路径与目标目录都必须是
 > `assets/批量引文模板.xlsx;assets` 这种带 `assets/` 前缀的写法（运行时从 `sys._MEIPASS/assets` 读取）。
