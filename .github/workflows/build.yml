@@ -39,22 +39,25 @@ jobs:
       # ═════════════════════════════════════════════════════
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
 
-      - name: Cache Cargo registry, index & binaries
-        uses: actions/cache@v4
+      # Swatinem/rust-cache：Cargo 语义级缓存（按 lockfile + 源码指纹精确失效），
+      # 命中时复用 registry + target 增量产物，比 actions/cache 整 key 失效高效得多
+      - name: Cache Cargo registry & build artifacts
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            ~/.cargo/bin
-            rust/target
-          key: ${{ runner.os }}-cargo-bin-${{ hashFiles('rust/src-tauri/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-bin-
+          workspaces: rust/src-tauri
+          cache-on-failure: true
 
-      - name: Install tauri-cli
-        run: cargo install tauri-cli --version "^2.0"
+      # 预编译 tauri-cli（官方 Release 二进制 ~7MB，秒级下载），替代 cargo install 源码编译（~7min）
+      - name: Install tauri-cli (prebuilt)
+        shell: pwsh
+        run: |
+          $ver = "2.11.4"
+          $url = "https://github.com/tauri-apps/tauri/releases/download/tauri-cli-v$ver/cargo-tauri-x86_64-pc-windows-msvc.zip"
+          Invoke-WebRequest -Uri $url -OutFile tauri-cli.zip
+          Expand-Archive tauri-cli.zip -DestinationPath "$env:USERPROFILE\.cargo\bin" -Force
+          Remove-Item tauri-cli.zip
+          cargo tauri --version
 
       - name: Bump version in Rust source
         working-directory: rust/src-tauri
@@ -71,9 +74,10 @@ jobs:
         working-directory: rust/src-tauri
         run: |
           cargo tauri build
+          # 保留 NSIS 默认命名 CNKI_<版本>_x64-setup.exe（不自定义改名）
           mkdir -p ../../dist
-          cp target/release/bundle/nsis/*.exe ../../dist/CNKI-rs-installer.exe
-          echo "installer -> $(du -h ../../dist/CNKI-rs-installer.exe | cut -f1)"
+          cp target/release/bundle/nsis/*.exe ../../dist/
+          echo "installer -> $(ls ../../dist/)"
 
       # ═════════════════════════════════════════════════════
       # 发布
@@ -84,7 +88,7 @@ jobs:
         with:
           name: ${{ github.ref_name }}
           files: |
-            dist/CNKI-rs-installer.exe
+            dist/*.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -95,7 +99,7 @@ jobs:
           PYTHONUNBUFFERED: "1"
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
           VERSION: ${{ steps.ver.outputs.version }}
-          EXE_PATH_RS: dist/CNKI-rs-installer.exe
+          EXE_PATH_RS: dist/CNKI_${{ steps.ver.outputs.version }}_x64-setup.exe
           NOTES: ${{ github.event.head_commit.message }}
           BRANCH: main
         run: python .github/workflows/sync_gitee.py

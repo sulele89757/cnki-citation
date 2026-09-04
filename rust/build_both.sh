@@ -3,6 +3,7 @@
 #   安装时由用户机器联网拉取 WebView2（轻量，~6.6MB）。
 # 不再提供内置 WebView2 的 offline 版本（构建/推送 Gitee 过慢，改用官方下载链接）。
 # 用法: bash build_both.sh   (在 rust 目录执行)
+# 产物保留 NSIS 默认命名：dist/CNKI_<版本>_x64-setup.exe
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -25,6 +26,7 @@ set_mode embedBootstrapper
 "${BUILD[@]}"
 inst=$(ls src-tauri/target/release/bundle/nsis/*.exe 2>/dev/null | head -1)
 [ -n "$inst" ] || { echo "未找到安装包"; exit 1; }
-cp "$inst" "$OUT/CNKI-rs-installer.exe"
-echo "    -> $OUT/CNKI-rs-installer.exe"
+# 保留 NSIS 默认命名 CNKI_<版本>_x64-setup.exe，仅落到 dist/ 便于统一分发
+cp "$inst" "$OUT/CNKI_${VER}_x64-setup.exe"
+echo "    -> $OUT/CNKI_${VER}_x64-setup.exe"
 echo "完成。"

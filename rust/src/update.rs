@@ -61,10 +61,9 @@ impl Updater {
 
         let mut download_url = String::new();
         // 优先精确匹配本工具（Rust 版）的发布物名；未命中则退化为首个 .exe，
-        // 兼容早期只有单一 exe 的发布。当前发布物为 NSIS 安装包
-        // `CNKI-rs-installer.exe`（embedBootstrapper，静默安装时用 /S 覆盖
-        // %LOCALAPPDATA%\CNKI），故按此名精确匹配，避免误下其它附件。
-        let want = "cnki-rs-installer.exe";
+        // 兼容早期只有单一 exe 的发布。发布物为 NSIS 安装包，采用 NSIS 默认命名
+        // `CNKI_<版本>_x64-setup.exe`（embedBootstrapper，静默安装时用 /S 覆盖
+        // %LOCALAPPDATA%\CNKI），故按该模式匹配，避免误下其它附件。
         if let (Some(rid), false) = (release.id, self.token.is_empty()) {
             let att_url = format!(
                 "https://gitee.com/api/v5/repos/{}/{}/releases/{}/attach_files",
@@ -87,7 +86,8 @@ impl Updater {
                                 "https://gitee.com/api/v5/repos/{}/{}/releases/{}/attach_files/{}/download?access_token={}",
                                 self.owner, self.repo, rid, aid, self.token
                             );
-                            if lower == want {
+                            // NSIS 默认命名：cnki_<版本>_x64-setup.exe
+                            if lower.starts_with("cnki_") && lower.ends_with("_x64-setup.exe") {
                                 download_url = url;
                                 break;
                             }

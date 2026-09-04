@@ -1,5 +1,8 @@
 # CNKI 论文引文获取工具
 
+[![Build status](https://github.com/sulele89757/cnki-citation/actions/workflows/build.yml/badge.svg)](https://github.com/sulele89757/cnki-citation/actions/workflows/build.yml)
+[![Release](https://img.shields.io/github/v/release/sulele89757/cnki-citation)](https://github.com/sulele89757/cnki-citation/releases)
+
 按论文标题在 **中国知网（CNKI）** 搜索论文，一键获取 **GB/T 7714-2025** 格式引文。支持单篇与 Excel 批量，自带拟人化反爬策略，可打包为单文件 exe。
 
 > **软件名称统一为 `CNKI`**：安装目录、桌面快捷方式、开始菜单项均命名为 `CNKI`；窗口标题仍为中文「CNKI 引文工具」。源文件保留 `-py` / `-rs` 后缀（如 `cnki_citation.py`、`cnki-citation-rs`），便于区分语言与版本。
@@ -25,7 +28,7 @@
 
 | | Python 版（参考代码） | Rust 版（推荐 · 实际发布） |
 |---|---|---|
-| 可执行文件 | `python/cnki_gui.py`（源码，需自装依赖运行） | `CNKI-rs-installer.exe`（NSIS 安装包） |
+| 可执行文件 | `python/cnki_gui.py`（源码，需自装依赖运行） | `CNKI_<版本>_x64-setup.exe`（NSIS 安装包，默认命名） |
 | 体积 | 取决于运行环境 | 安装包 ~6.6MB（安装时联网拉取 WebView2） |
 | 技术栈 | CustomTkinter + Playwright(headless) | Tauri v2（WebView2）+ headless_chrome |
 | 构建方式 | PyInstaller `--onefile`（已停用） | `cargo tauri build`（CI 自动） |
@@ -39,13 +42,13 @@
 
 - Windows 10/11
 - **WebView2 Runtime**：绝大多数系统已自带；安装包会在安装时自动联网下载安装（见下方链接，亦可提前手动预装）
-- Google Chrome（推荐，指纹最真实）；未安装时回退 Playwright 内置 Chromium
+- Google Chrome 或 Microsoft Edge（推荐 Chrome，指纹最真实）；两者都未安装时，工具会自动下载 Chromium 内核兜底（约 200MB，仅首次）
 - Python 3.12+（仅 Python 版 GUI 需要系统 Python 自带 `tkinter`）
 
 ## 快速开始（exe 版）
 
-1. 从 [Gitee 发行版](https://gitee.com/sulele/cnki-citation/releases) 下载 `CNKI-rs-installer.exe`（Rust 版，~6.6MB）。
-2. 双击 `CNKI-rs-installer.exe` 安装，桌面与开始菜单会生成 **`CNKI`** 快捷方式（安装目录为 `%LOCALAPPDATA%\CNKI`）。
+1. 从 [Gitee 发行版](https://gitee.com/sulele/cnki-citation/releases) 下载 `CNKI_<版本>_x64-setup.exe`（Rust 版安装包，~6.6MB；文件名按 NSIS 默认规则随版本变化）。
+2. 双击该安装包，桌面与开始菜单会生成 **`CNKI`** 快捷方式（安装目录为 `%LOCALAPPDATA%\CNKI`）。
 3. 首次运行若提示缺少 WebView2，按提示联网安装即可（或预先装好，见下方链接）。
 4. 单篇：输入标题 →「获取引文」；批量：选 Excel →「开始批量处理」。
 
@@ -85,11 +88,11 @@ python cnki_citation.py --excel papers.xlsx  # 命令行批量
 ### Rust / Tauri 版（从源码构建）
 
 ```bash
-# 需要 Rust 稳定版 + 系统 Chrome（headless_chrome 驱动真实 Chrome）
+# 需要 Rust 稳定版 + 系统 Chrome/Edge（headless_chrome 驱动真实浏览器）
 cd rust/src-tauri
 cargo tauri build
-# 产物：target/release/bundle/nsis/CNKI_1.0.4_x64-setup.exe
-# 复制为 ../dist/CNKI-rs-installer.exe 即可分发（bash rust/build_both.sh 已自动完成）
+# 产物：target/release/bundle/nsis/CNKI_<版本>_x64-setup.exe（NSIS 默认命名）
+# bash rust/build_both.sh 会自动复制到 rust/dist/ 下同名文件
 ```
 
 > 前端通过 `include_bytes!` 内嵌于二进制，无需单独资源目录；`tauri.conf.json` 中
@@ -128,11 +131,11 @@ git tag v1.x.x && git push github --tags
 
 触发 `.github/workflows/build.yml`，构建并发布：
 
-1. **Rust 版**：`windows-latest` + `cargo tauri build`（embedBootstrapper）→ `CNKI-rs-installer.exe`
+1. **Rust 版**：`windows-latest` + `cargo tauri build`（embedBootstrapper）→ `CNKI_<版本>_x64-setup.exe`（NSIS 默认命名）
 2. 发布到 **GitHub Release**
 3. `sync_gitee.py` 同步到 **Gitee Releases**（国内下载源）
 
-> Python 版不再参与 CI 构建（仅保留源码作为参考），因此 Gitee 上只会看到 Rust 安装包一个附件。
+> Python 版不再参与 CI 构建（仅保留源码作为参考），因此 Gitee 上只会看到 Rust 安装包（`CNKI_<版本>_x64-setup.exe`）一个附件。
 
 Gitee 令牌通过 GitHub Secret `GITEE_TOKEN` 注入。
 
@@ -140,7 +143,7 @@ Gitee 令牌通过 GitHub Secret `GITEE_TOKEN` 注入。
 
 ```bash
 # Rust 版（仅构建，不上传）：bash rust/build_both.sh
-# 产物：rust/dist/CNKI-rs-installer.exe（embedBootstrapper，~6.6MB）
+# 产物：rust/dist/CNKI_<版本>_x64-setup.exe（embedBootstrapper，~6.6MB）
 ```
 
 > `build_release.py`（原 Python 版本地构建脚本）已删除；Python 版保留源码在 `python/`，如需自跑见上方「从源码运行 → Python 版（仅参考）」。
@@ -148,8 +151,9 @@ Gitee 令牌通过 GitHub Secret `GITEE_TOKEN` 注入。
 > **关于软件名 / 目录 / exe 文件名**
 > 软件名称统一为 **`CNKI`**（纯 ASCII，GitHub Actions 的 Windows runner 不会剥离字符）。
 > 源文件保留 `-py` / `-rs` 后缀以区分语言与版本：Python 源码置于 `python/`（含 `cnki_citation.py` / `cnki_gui.py`），
-> Rust crate 名 `cnki-citation-rs`（置于 `rust/`）。Rust 安装包以 `productName = "CNKI"` 构建，故安装目录与
-> 桌面 / 开始菜单快捷方式均为 `CNKI`；窗口标题仍为中文「CNKI 引文工具」。
+> Rust crate 名 `cnki-citation-rs`（置于 `rust/`）。Rust 安装包以 `productName = "CNKI"` 构建并**沿用 NSIS 默认命名**
+> `CNKI_<版本>_x64-setup.exe`（不再自定义 `-rs-installer` 之类名字；Python 已不发布，无需区分后缀），
+> 安装目录与桌面 / 开始菜单快捷方式均为 `CNKI`；窗口标题仍为中文「CNKI 引文工具」。
 > Python 版打包（仅参考）资源统一在 `python/assets/` 子目录，`--add-data` 的源路径与目标目录都必须是
 > `assets/批量引文模板.xlsx;assets` 这种带 `assets/` 前缀的写法（运行时从 `sys._MEIPASS/assets` 读取）。
 
@@ -174,7 +178,7 @@ cnki_search/
 │   ├── Cargo.toml            # 核心库 cnki_citation_rs（抓取引擎）
 │   ├── build_both.sh         # 本地一键构建 embedBootstrapper 安装包
 │   ├── src/                  # 库源码：behavior/citation/excel/stealth/update/version…
-│   ├── dist/CNKI-rs-installer.exe  # 本地构建产物（embedBootstrapper，~6.6MB）
+│   ├── dist/CNKI_<版本>_x64-setup.exe  # 本地构建产物（NSIS 默认命名，~6.6MB）
 │   └── src-tauri/            # Tauri 应用（依赖上方库 + browser feature）
 │       ├── Cargo.toml
 │       ├── tauri.conf.json   # productName=CNKI，webviewInstallMode=embedBootstrapper

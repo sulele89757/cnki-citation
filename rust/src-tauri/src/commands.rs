@@ -226,7 +226,7 @@ pub fn perform_update(app: AppHandle, download_url: String) -> Result<(), String
 
 /// 实际执行：下载 NSIS 安装包 → 写 bat → 以 DETACHED 方式启动 bat → 退出当前进程。
 ///
-/// 进程退出后 exe 文件解锁，bat 再以静默方式运行 `CNKI-rs-installer.exe /S`，
+/// 进程退出后 exe 文件解锁，bat 再以静默方式运行 NSIS 安装包 `/S`，
 /// 由 NSIS 负责覆盖 `%LOCALAPPDATA%\CNKI`（含正在运行的 exe），装完自动重启。
 fn do_update(app: &AppHandle, download_url: &str) -> Result<(), String> {
     let _ = app.emit("log", "[更新] 正在下载新版本安装包（约 6.6MB）...");
@@ -274,7 +274,7 @@ fn do_update(app: &AppHandle, download_url: &str) -> Result<(), String> {
 
 /// 更新 bat（纯 ASCII，路径通过 `%1`/`%2` 传入，规避 GBK 编码与中文路径问题）。
 ///
-/// - `%1` = 下载到 temp 的 NSIS 安装包（`CNKI-rs-installer.exe`）；`%2` = 当前 exe 路径。
+/// - `%1` = 下载到 temp 的 NSIS 安装包（`CNKI_<版本>_x64-setup.exe`）；`%2` = 当前 exe 路径。
 /// - `start /wait` 静默运行安装包（`/S`），由 NSIS 覆盖 `%LOCALAPPDATA%\CNKI`；
 ///   安装完成后（沿用先前记录的安装目录）再 `start` 同路径的新 exe，最后 `del` 自身。
 const UPDATE_BAT: &str = "@echo off\r\n\
