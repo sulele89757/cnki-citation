@@ -393,6 +393,13 @@ fn launch_browser(opts: &RunOpts, paths: &Paths) -> anyhow::Result<Browser> {
             OsStr::new("--disable-infobars"),
             OsStr::new("--no-sandbox"),
             OsStr::new("--window-size=1920,1080"),
+            // 禁止后台节流：窗口被最小化 / 被其它窗口遮挡时，Chrome 会判定页面 hidden 并挂起
+            // 定时器与渲染进程，导致 CNKI 页面卡住、抓取失败。加以下标志让其在后台仍照常运行，
+            // 用户可放心最小化或切到别的窗口去做别的事。
+            OsStr::new("--disable-background-timer-throttling"),
+            OsStr::new("--disable-backgrounding-occluded-windows"),
+            OsStr::new("--disable-renderer-backgrounding"),
+            OsStr::new("--disable-features=CalculateNativeWinOcclusion"),
         ])
         .ignore_default_args(vec![OsStr::new("--enable-automation")])
         .window_size(Some((1920, 1080)))
