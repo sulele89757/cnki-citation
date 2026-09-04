@@ -1,6 +1,5 @@
 # CNKI 论文引文获取工具
 
-[![Build status](https://github.com/sulele89757/cnki-citation/actions/workflows/build.yml/badge.svg)](https://github.com/sulele89757/cnki-citation/actions/workflows/build.yml)
 [![Release](https://img.shields.io/github/v/release/sulele89757/cnki-citation)](https://github.com/sulele89757/cnki-citation/releases)
 
 按论文标题在 **中国知网（CNKI）** 搜索论文，一键获取 **GB/T 7714-2025** 格式引文。支持单篇与 Excel 批量，自带拟人化反爬策略，可打包为单文件 exe。
