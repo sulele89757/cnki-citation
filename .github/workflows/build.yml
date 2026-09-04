@@ -3,9 +3,13 @@ name: Build and Release
 # 触发：推送 tag（形如 v1.0.1）即自动构建并发布
 # 构建：GitHub 云端 windows-latest（无需本机常驻）
 # 发布产物：
-#   ① CNKICitationTool.exe      — Python/PyInstaller 版（60MB+，含 Python 运行时 + 浏览器）
-#   ② CNKICitationTool-rs.exe  — Rust/Tauri 原生版（22MB，单文件 WebView2 桌面应用）
-# 同步到 Gitee Release（国内用户从 Gitee 下载，稳、快）
+#   GitHub Release（三个全上）：
+#     ① CNKICitationTool.exe                       — Python/PyInstaller 版
+#     ② CNKICitationTool-rs-offline-installer.exe  — Tauri NSIS，内置 WebView2 离线可装（~150MB）
+#     ③ CNKICitationTool-rs-lite-installer.exe     — Tauri NSIS，安装时联网下载 WebView2（轻量）
+#   Gitee Release（附件单文件 ≤100MB）：Python + lite 直传；offline 超限 →
+#     sync_gitee.py 自动切成 ≤95MB 分卷 + Rust 自合并引导器（offline_join.exe，
+#     用户双击即自动拼回并启动安装器），国内用户从 Gitee 下载
 on:
   push:
     tags:
@@ -68,22 +72,26 @@ jobs:
             cnki_gui.py
 
       # ═════════════════════════════════════════════════════
-      # ② Rust / Tauri 构建（CNKICitationTool-rs.exe）
+      # ② Rust / Tauri 构建（两个 NSIS 安装包：内置版 + 联网引导版）
       # ═════════════════════════════════════════════════════
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
 
-      - name: Cache Cargo registry & index
+      - name: Cache Cargo registry, index & binaries
         uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
+            ~/.cargo/bin
             cnki_rust/target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('cnki_rust/src-tauri/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
+          key: ${{ runner.os }}-cargo-bin-${{ hashFiles('cnki_rust/src-tauri/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-bin-
+
+      - name: Install tauri-cli
+        run: cargo install tauri-cli --version "^2.0"
 
       - name: Bump version in Rust source
         working-directory: cnki_rust/src-tauri
@@ -96,22 +104,34 @@ jobs:
           sed -i "s/^version = .*/version = \"${VER}\"/" ../Cargo.toml
           echo "Rust version -> $VER"
 
-      - name: Build Rust exe (Tauri)
+      # —— 第一次构建：内置 WebView2 的离线安装包（~150MB，国内用户离线可装）——
+      - name: Build Tauri offline installer
         working-directory: cnki_rust/src-tauri
-        run: cargo build --release
-
-      - name: Rename Rust exe to CNKICitationTool-rs
         run: |
-          SRC="cnki_rust/src-tauri/target/release/cnki-citation-rs.exe"
-          DST="dist/CNKICitationTool-rs.exe"
-          if [ -f "$SRC" ]; then
-            cp -f "$SRC" "$DST"
-            echo "Rust exe -> $DST ($(du -h "$DST" | cut -f1))"
-          else
-            echo "ERROR: Rust exe not found at $SRC"
-            ls cnki_rust/src-tauri/target/release/*.exe 2>/dev/null || echo "No exe in target/release/"
-            exit 1
-          fi
+          node -e "const fs=require('fs');const p='tauri.conf.json';const d=JSON.parse(fs.readFileSync(p,'utf8'));d.bundle.windows.webviewInstallMode.type='offlineInstaller';fs.writeFileSync(p,JSON.stringify(d,null,2));"
+          cargo tauri build
+          mkdir -p ../../dist
+          cp target/release/bundle/nsis/*.exe ../../dist/CNKICitationTool-rs-offline-installer.exe
+          echo "offline installer -> $(du -h ../../dist/CNKICitationTool-rs-offline-installer.exe | cut -f1)"
+
+      # —— 第二次构建：安装时联网下载 WebView2 的轻量安装包（用户机器拉取）——
+      - name: Build Tauri lite installer
+        working-directory: cnki_rust/src-tauri
+        run: |
+          node -e "const fs=require('fs');const p='tauri.conf.json';const d=JSON.parse(fs.readFileSync(p,'utf8'));d.bundle.windows.webviewInstallMode.type='embedBootstrapper';fs.writeFileSync(p,JSON.stringify(d,null,2));"
+          cargo tauri build
+          cp target/release/bundle/nsis/*.exe ../../dist/CNKICitationTool-rs-lite-installer.exe
+          echo "lite installer -> $(du -h ../../dist/CNKICitationTool-rs-lite-installer.exe | cut -f1)"
+
+      - name: Restore tauri.conf.json webviewInstallMode
+        run: |
+          node -e "const fs=require('fs');const p='cnki_rust/src-tauri/tauri.conf.json';const d=JSON.parse(fs.readFileSync(p,'utf8'));d.bundle.windows.webviewInstallMode.type='offlineInstaller';fs.writeFileSync(p,JSON.stringify(d,null,2));"
+
+      # —— 编译 Gitee 离线包用的自合并引导器（offline_join.rs，~270KB）——
+      - name: Build offline join launcher (Rust)
+        run: |
+          rustc --edition 2021 -O -C strip=symbols cnki_rust/offline_join.rs -o dist/CNKICitationTool-rs-offline.exe
+          echo "launcher -> dist/CNKICitationTool-rs-offline.exe ($(du -h dist/CNKICitationTool-rs-offline.exe | cut -f1))"
 
       # ═════════════════════════════════════════════════════
       # ③ 发布
@@ -123,7 +143,8 @@ jobs:
           name: ${{ github.ref_name }}
           files: |
             dist/CNKICitationTool.exe
-            dist/CNKICitationTool-rs.exe
+            dist/CNKICitationTool-rs-offline-installer.exe
+            dist/CNKICitationTool-rs-lite-installer.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -135,7 +156,8 @@ jobs:
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
           VERSION: ${{ steps.ver.outputs.version }}
           EXE_PATH_PYTHON: dist/CNKICitationTool.exe
-          EXE_PATH_RUST: dist/CNKICitationTool-rs.exe
+          EXE_PATH_RS_LITE: dist/CNKICitationTool-rs-lite-installer.exe
+          EXE_PATH_RS_OFFLINE: dist/CNKICitationTool-rs-offline-installer.exe
           NOTES: ${{ github.event.head_commit.message }}
           BRANCH: main
         run: python .github/workflows/sync_gitee.py
