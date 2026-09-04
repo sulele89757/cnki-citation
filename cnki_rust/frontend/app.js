@@ -340,17 +340,51 @@
       }
       if (res.has_update) {
         appendLog("[更新] 发现新版本 " + res.latest + "！");
-        const ans = await dialog.ask(
-          "当前版本：v" + APP_VER + "\n最新版本：" + res.latest + "\n\n是否打开下载页面？",
-          { title: "发现新版本", okLabel: "打开", cancelLabel: "稍后" }
+        const ok = await dialog.confirm(
+          "当前版本：v" + APP_VER + "\n最新版本：" + res.latest +
+            (res.notes ? "\n\n更新说明：\n" + res.notes : "") +
+            "\n\n是否立即下载并更新？（下载约 22MB，会自动重启）",
+          { title: "发现新版本", okLabel: "立即更新", cancelLabel: "稍后" }
         );
-        if (ans && res.url) await openPath(res.url);
+        if (ok) {
+          await doUpdate(res.download_url, res.latest);
+        } else if (res.url) {
+          appendLog("[更新] 已取消，可稍后在发布页手动下载：" + res.url);
+        }
       } else {
         appendLog("[更新] 已是最新版本");
         if (!silent) dialog.message("已是最新版本 v" + APP_VER, { title: "检查更新" });
       }
     } catch (e) {
       appendLog("[更新] 检测失败：" + e);
+    }
+  }
+
+  // 真正发起自更新：调用 Rust 侧的 perform_update。
+  // 该命令会立即返回（下载在后台线程进行），随后进程退出并自动重启到新版本；
+  // 若 invoke 抛错则表示启动失败（如缺少下载地址）。
+  async function doUpdate(downloadUrl, latest) {
+    if (!invoke) {
+      appendLog("[更新] IPC 不可用，无法自更新");
+      return;
+    }
+    if (!downloadUrl) {
+      appendLog("[更新] 缺少下载地址，改打开发布页");
+      if (latest) await openPath(latest);
+      return;
+    }
+    setStatus("⚙ 正在下载更新...", "var(--warning)");
+    appendLog("[更新] 正在下载新版本（约 22MB），请勿关闭窗口...");
+    try {
+      await invoke("perform_update", { downloadUrl });
+      setStatus("⚙ 更新中，即将重启...", "var(--warning)");
+      appendLog("[更新] 已启动更新流程，程序即将重启...");
+    } catch (e) {
+      setStatus("✗ 更新失败", "var(--danger)");
+      appendLog("[更新] 更新失败：" + e);
+      dialog.message("自动更新失败：\n" + e + "\n\n可前往发布页手动下载。", {
+        title: "更新失败",
+      });
     }
   }
   on("btn-update", "click", () => checkUpdate(false));

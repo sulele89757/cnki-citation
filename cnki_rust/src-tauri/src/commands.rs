@@ -1,6 +1,7 @@
 //! Tauri IPC 命令：把已有的 Rust 抓取引擎桥接到前端 Web UI。
 
 use std::path::PathBuf;
+use std::process::Command;
 use std::sync::Mutex;
 
 use serde::Serialize;
@@ -14,6 +15,9 @@ use cnki_citation_rs::update::Updater;
 const GITEE_OWNER: &str = "sulele";
 const GITEE_REPO: &str = "cnki-citation";
 const GITEE_TOKEN: &str = "7fdea635702f2c7d1005de1620476aa1";
+
+/// 本工具（Rust 版）可执行文件名，用于自更新时定位临时文件与旧 exe。
+const APP_NAME: &str = "CNKICitationTool-rs";
 
 /// 并发守卫：避免同一时刻重复启动抓取任务。
 static RUNNING: Mutex<bool> = Mutex::new(false);
@@ -200,6 +204,97 @@ pub fn check_update() -> UpdateInfoDto {
         Err(_) => UpdateInfoDto::default(),
     }
 }
+
+// ════════════════════════════════════════════
+//  自更新（下载新版本 → 写替换脚本 → 重启）
+// ════════════════════════════════════════════
+/// 触发自更新：在后台线程下载并替换自身，完成后主动退出以解锁 exe。
+///
+/// 真正的下载 / 替换逻辑在 `do_update` 中，本命令立即返回以免阻塞 UI 主线程。
+#[tauri::command]
+pub fn perform_update(app: AppHandle, download_url: String) -> Result<(), String> {
+    if download_url.trim().is_empty() {
+        return Err("缺少下载地址，无法更新".into());
+    }
+    std::thread::spawn(move || {
+        if let Err(e) = do_update(&app, &download_url) {
+            let _ = app.emit("log", format!("[更新] ⚠ 更新失败：{e}"));
+        }
+    });
+    Ok(())
+}
+
+/// 实际执行：下载 → 写 bat → 以 DETACHED 方式启动 bat → 退出当前进程。
+///
+/// 进程退出后 exe 文件解锁，bat 才能 `move /Y` 覆盖成功。
+fn do_update(app: &AppHandle, download_url: &str) -> Result<(), String> {
+    let _ = app.emit("log", "[更新] 正在下载新版本（约 22MB）...");
+
+    let tmp = std::env::temp_dir();
+    let new_exe = tmp.join(format!("{APP_NAME}_new.exe"));
+    // 清理上一次可能残留的临时文件，避免 move 到旧文件
+    let _ = std::fs::remove_file(&new_exe);
+
+    cnki_citation_rs::update::download(download_url, &new_exe)?;
+
+    let _ = app.emit("log", "[更新] 下载完成，正在准备替换...");
+
+    let current = std::env::current_exe().map_err(|e| e.to_string())?;
+    let bat = tmp.join(format!("{APP_NAME}_update.bat"));
+    std::fs::write(&bat, UPDATE_BAT).map_err(|e| format!("写入更新脚本失败：{e}"))?;
+
+    // DETACHED_PROCESS(0x08) + CREATE_NEW_PROCESS_GROUP(0x200)：
+    // bat 与当前进程解耦，当前进程退出后 bat 仍继续跑（负责替换 + 重启）。
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        Command::new(&bat)
+            .arg(&new_exe)
+            .arg(&current)
+            .creation_flags(0x08 | 0x200)
+            .spawn()
+            .map_err(|e| format!("启动更新脚本失败：{e}"))?;
+    }
+    #[cfg(not(windows))]
+    {
+        // 非 Windows（开发/跨平台兜底）：直接覆盖后启动
+        let _ = std::fs::rename(&new_exe, &current);
+        Command::new(&current)
+            .spawn()
+            .map_err(|e| format!("启动新版失败：{e}"))?;
+        let _ = std::fs::remove_file(&bat);
+    }
+
+    let _ = app.emit("log", "[更新] 更新脚本已启动，即将重启...");
+    // 略等 bat 起来，再退出解锁 exe
+    std::thread::sleep(std::time::Duration::from_millis(800));
+    std::process::exit(0);
+}
+
+/// 更新 bat（纯 ASCII，路径通过 `%1`/`%2` 传入，规避 GBK 编码与中文路径问题）。
+///
+/// - `%1` = 下载到 temp 的新 exe；`%2` = 当前正在运行的 exe。
+/// - 每 2 秒尝试 `move /Y`，直到源文件不存在（即移动成功）或重试 30 次（60s 超时）。
+/// - 仅当移动成功才 `cd` 到安装目录并 `start` 新 exe，最后 `del` 自身。
+const UPDATE_BAT: &str = "@echo off\r\n\
+set \"SRC=%~1\"\r\n\
+set \"DST=%~2\"\r\n\
+set \"OK=0\"\r\n\
+for /L %%i in (1,1,30) do (\r\n\
+  move /Y \"%SRC%\" \"%DST%\" >nul 2>&1\r\n\
+  if not exist \"%SRC%\" (\r\n\
+    set \"OK=1\"\r\n\
+    goto :done\r\n\
+  )\r\n\
+  timeout /t 2 >nul\r\n\
+)\r\n\
+:done\r\n\
+if \"%OK%\"==\"1\" (\r\n\
+  for %%I in (\"%DST%\") do set \"DSTDIR=%%~dpI\"\r\n\
+  cd /d \"%DSTDIR%\"\r\n\
+  start \"\" \"%DST%\"\r\n\
+)\r\n\
+del \"%~f0\"\r\n";
 
 // ════════════════════════════════════════════
 //  历史记录清理

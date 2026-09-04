@@ -2,6 +2,8 @@
 
 use crate::version;
 use serde::Deserialize;
+use std::io::Read;
+use std::path::Path;
 use std::time::Duration;
 
 #[derive(Debug, Clone, Default)]
@@ -58,6 +60,10 @@ impl Updater {
         let has = version::norm_ver(&latest) > version::norm_ver(&self.current);
 
         let mut download_url = String::new();
+        // 优先精确匹配本工具（Rust 版）的 exe 名；未命中则退化为首个 .exe，
+        // 兼容早期只有单一 exe 的发布。一个 release 挂了 Python / Rust 两个
+        // exe，若不精确匹配可能下载错版本（对标 Python 版同名 bug 修复）。
+        let want = "cnkicitationtool-rs.exe";
         if let (Some(rid), false) = (release.id, self.token.is_empty()) {
             let att_url = format!(
                 "https://gitee.com/api/v5/repos/{}/{}/releases/{}/attach_files",
@@ -69,16 +75,28 @@ impl Updater {
                 .call()
             {
                 if let Ok(atts) = aresp.into_json::<Vec<Attachment>>() {
+                    let mut fallback: Option<String> = None;
                     for a in atts {
                         if let (Some(n), Some(aid)) = (a.name, a.id) {
-                            if n.to_lowercase().ends_with(".exe") {
-                                download_url = format!(
-                                    "https://gitee.com/api/v5/repos/{}/{}/releases/{}/attach_files/{}/download?access_token={}",
-                                    self.owner, self.repo, rid, aid, self.token
-                                );
+                            let lower = n.to_lowercase();
+                            if !lower.ends_with(".exe") {
+                                continue;
+                            }
+                            let url = format!(
+                                "https://gitee.com/api/v5/repos/{}/{}/releases/{}/attach_files/{}/download?access_token={}",
+                                self.owner, self.repo, rid, aid, self.token
+                            );
+                            if lower == want {
+                                download_url = url;
                                 break;
                             }
+                            if fallback.is_none() {
+                                fallback = Some(url);
+                            }
                         }
+                    }
+                    if download_url.is_empty() {
+                        download_url = fallback.unwrap_or_default();
                     }
                 }
             }
@@ -92,4 +110,22 @@ impl Updater {
             download_url,
         })
     }
+}
+
+/// 把 `url` 指向的文件下载到 `dest`（用于自更新）。
+///
+/// 复用 ureq 的 TLS 配置（与 `check` 一致），默认跟随重定向。
+/// 下载为阻塞式，调用方应在后台线程执行以免卡住 UI。
+pub fn download(url: &str, dest: &Path) -> Result<(), String> {
+    let resp = ureq::get(url)
+        .timeout(Duration::from_secs(300))
+        .call()
+        .map_err(|e| format!("{e}"))?;
+    let mut reader = resp.into_reader();
+    let mut buf = Vec::new();
+    reader
+        .read_to_end(&mut buf)
+        .map_err(|e| format!("读取下载流失败：{e}"))?;
+    std::fs::write(dest, &buf).map_err(|e| format!("写入临时文件失败：{e}"))?;
+    Ok(())
 }

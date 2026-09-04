@@ -81,6 +81,7 @@ fn main() {
             commands::start_single,
             commands::start_batch,
             commands::check_update,
+            commands::perform_update,
             commands::history_count,
             commands::clean_history,
             commands::download_template,
