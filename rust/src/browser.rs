@@ -332,6 +332,10 @@ fn search_paper(tab: &Tab, title: &str, opts: &RunOpts, paths: &Paths) {
 }
 
 /// 在当前页内 JS 定位论文行并点击「引用」按钮，返回是否点击成功。
+///
+/// CNKI 搜索结果行的「引用」图标通常是 `<li>` / `<span>` 套 `<img src="...quote.png">`，
+/// **不是 `<a>`**。原实现按 `<a>` + href/文字匹配极易错中「导出」「详情」等链接。
+/// 改为：精确命中 `img[src*='quote']` 或 `[title='引用']` 等，再 click 其可点击祖先。
 fn click_cite(tab: &Tab, title: &str) -> bool {
     let tt = serde_json::to_string(title).unwrap_or_default();
     let js = format!(
@@ -341,27 +345,58 @@ fn click_cite(tab: &Tab, title: &str) -> bool {
             var tt = {tt};
             for (var i = 0; i < rows.length; i++) {{
                 var row = rows[i];
-                var nameLink = row.querySelector('.name a, td.name a, a.fz14');
-                if (!nameLink || nameLink.textContent.indexOf(tt) < 0) continue;
-                var as = row.querySelectorAll('a');
-                for (var j = 0; j < as.length; j++) {{
-                    var a = as[j];
-                    var h = (a.href || '').toLowerCase();
-                    var t = (a.title || '') + (a.textContent || '');
-                    var img = a.querySelector('img');
-                    var src = img ? (img.src || '').toLowerCase() : '';
-                    if (h.indexOf('cite') >= 0 || t.indexOf('引用') >= 0 ||
-                        src.indexOf('cite') >= 0 || src.indexOf('quote') >= 0) {{
-                        a.click();
+                if (row.textContent.indexOf(tt) < 0) continue;
+                // 1) 直接匹配引用图标
+                var img = row.querySelector("img[src*='quote'], img[src*='cite'], img[alt='引用'], img[title='引用']");
+                var target = img;
+                if (!target) {{
+                    // 2) 备选：title / data-action 属性
+                    target = row.querySelector("[title='引用'], [data-action='cite'], [onclick*='cite']");
+                }}
+                if (!target) return false;
+                // click 可点击祖先（a / li / span / button / i），确保触发 layer.open
+                var node = target;
+                for (var k = 0; k < 4 && node && node !== row; k++) {{
+                    var tag = (node.tagName || '').toLowerCase();
+                    if (tag === 'a' || tag === 'li' || tag === 'span' || tag === 'button' || tag === 'i' || node.onclick) {{
+                        node.click();
                         return true;
                     }}
+                    node = node.parentNode;
                 }}
+                target.click();
+                return true;
             }}
             return false;
         }})()
     "#
     );
     eval_bool(tab, &js)
+}
+
+/// 等待 CNKI 引用弹窗 / iframe / textarea 出现（最长 `max_wait`）。
+/// CNKI 引用通常是 layer.open 弹出的 div，里面再嵌套 iframe；
+/// 若直接 window.open 新 tab，textarea 直接出现在新页面。
+/// 任一信号出现即返回，避免固定 sleep 在慢机器/最小化时误判空引文。
+fn wait_for_citation(tab: &Tab, max_wait: Duration) {
+    let js = r#"
+        (function() {
+            if (document.querySelector('textarea')) return true;
+            if (document.querySelector("iframe[src*='cite'], iframe[name*='cite'], iframe[id*='cite']")) return true;
+            // layui layer 弹层
+            if (document.querySelector('.layui-layer, .layui-layer-iframe, [class*="layer"]')) return true;
+            // 任意可见的 modal / 引用样式
+            if (document.querySelector("[class*='cite'], [id*='cite'], [class*='Modal'], [class*='modal']")) return true;
+            return false;
+        })()
+    "#;
+    let deadline = std::time::Instant::now() + max_wait;
+    while std::time::Instant::now() < deadline {
+        if eval_bool(tab, js) {
+            return;
+        }
+        sleep(Duration::from_millis(300));
+    }
 }
 
 /// 从引用页提取 GB/T 7714-2025 引文（textarea 优先，否则正文）。
@@ -451,7 +486,10 @@ fn process_one(browser: &Browser, tab: &Tab, title: &str, opts: &RunOpts, paths:
             }
             anyhow::bail!("未找到论文「{title}」的引用按钮");
         }
-        sleep(Duration::from_secs(3));
+
+        // 等待引用弹窗 / iframe 出现（最多 ~8s）。CNKI「引用」是 layer.open 弹层，
+        // 动画 + iframe 加载加起来常超过 3s，固定 sleep 容易误判空引文。
+        wait_for_citation(tab, Duration::from_secs(8));
 
         // 检测是否打开了新标签页（CNKI 引用有时 window.open）
         let tabs_guard = browser.get_tabs().lock().unwrap();
@@ -461,7 +499,7 @@ fn process_one(browser: &Browser, tab: &Tab, title: &str, opts: &RunOpts, paths:
             tab
         };
         let _ = cite_tab.wait_until_navigated();
-        sleep(Duration::from_secs(1));
+        sleep(Duration::from_millis(500));
 
         match extract_from_tab(cite_tab) {
             Some(c) if c.len() > 20 => Ok(Some(c)),

@@ -8,7 +8,7 @@ sync_gitee.py — 把本地构建好的 exe 同步到 Gitee Releases（供 GitHu
   VERSION       版本号（形如 1.0.1，不含 v 前缀）
   待上传文件（可任选其一或多个）：
     EXE_PATH              单文件路径
-    EXE_PATH_RS           Tauri NSIS 安装包（CNKI-rs-installer.exe，embedBootstrapper）
+    EXE_PATH_RS           Tauri NSIS 安装包（CNKI_<版本>_x64-setup.exe，embedBootstrapper）
     EXE_PATH_PYTHON       Python 版 exe（现已不再构建，仅保留兼容）
     EXE_PATH_RUST         Rust 裸 exe（向后兼容）
   NOTES         发布说明（可选）
@@ -17,7 +17,7 @@ sync_gitee.py — 把本地构建好的 exe 同步到 Gitee Releases（供 GitHu
 流程：
   POST /releases 建 Release（tag 已存在则 GET /releases/tags/{tag} 复用）
   → multipart 上传 exe 到 /releases/{id}/attach_files
-Gitee 附件单文件上限 100MB；Rust 安装包（CNKI-rs-installer.exe，~6.6MB）远小于上限，
+Gitee 附件单文件上限 100MB；Rust 安装包（CNKI_<版本>_x64-setup.exe，~6.6MB）远小于上限，
 直接整包上传即可（不再提供内置 WebView2 的离线版，故无需分卷与自合并引导器）。
 """
 import json

@@ -4,8 +4,8 @@ name: Build and Release
 # 构建：GitHub 云端 windows-latest（无需本机常驻）
 # 仅构建 Rust/Tauri 实现（Python 版仅作为参考代码保留，不再参与构建）
 # 发布产物：
-#   GitHub Release：CNKI-rs-installer.exe — Tauri NSIS，安装时联网下载 WebView2（轻量）
-#   Gitee Release（国内镜像）：CNKI-rs-installer.exe 直传（<100MB，无需分卷）
+#   GitHub Release：CNKI_<版本>_x64-setup.exe — Tauri NSIS，安装时联网下载 WebView2（轻量）
+#   Gitee Release（国内镜像）：CNKI_<版本>_x64-setup.exe 直传（<100MB，无需分卷）
 on:
   push:
     tags:
@@ -35,7 +35,7 @@ jobs:
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
       # ═════════════════════════════════════════════════════
-      # Rust / Tauri 构建（CNKI-rs-installer.exe）
+      # Rust / Tauri 构建（CNKI_<版本>_x64-setup.exe）
       # ═════════════════════════════════════════════════════
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@stable
