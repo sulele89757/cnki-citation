@@ -45,6 +45,17 @@
     open: typeof D.open === "function" ? (o) => D.open(o) : async () => null,
   };
 
+  // 禁掉非编辑区的 WebView2 默认右键菜单（返回/刷新/打印/更多工具）。
+  // 根因：右键「刷新」会重载页面 → 末尾有 setTimeout(checkUpdate, 2500)
+  // 的静默检查更新会被反复触发。在 input/textarea/contenteditable 上
+  // 放行默认菜单，保留复制/粘贴/剪切。
+  document.addEventListener("contextmenu", (e) => {
+    const t = e.target;
+    if (!t) return;
+    if (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable) return;
+    e.preventDefault();
+  });
+
   let APP_VER = "1.0.4";
   let running = false;
 
@@ -388,6 +399,14 @@
     }
   }
   on("btn-update", "click", () => checkUpdate(false));
+  on("btn-show-browser", "click", async () => {
+    if (!invoke) return;
+    try {
+      await invoke("show_browser");
+    } catch (e) {
+      appendLog("[错误] 拉回浏览器窗口失败：" + e);
+    }
+  });
 
   async function refreshHistory() {
     if (!invoke) return;

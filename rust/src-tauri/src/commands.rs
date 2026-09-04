@@ -14,6 +14,14 @@ use cnki_citation_rs::browser::{self, RunOpts};
 use cnki_citation_rs::config;
 use cnki_citation_rs::update::Updater;
 
+/// 把屏外运行的驱动浏览器窗口拉回屏幕并置前（供人工介入 / 查看进度用）。
+#[tauri::command]
+pub fn show_browser(app: AppHandle) -> Result<(), String> {
+    browser::bring_browser_window_on_screen();
+    let _ = app.emit("log", "[系统] 已把浏览器窗口拉回屏幕（可操作验证码 / 登录）");
+    Ok(())
+}
+
 /// Gitee 更新检测配置（与 Python 版一致；该 token 仅只读权限，可打包进 exe）。
 const GITEE_OWNER: &str = "sulele";
 const GITEE_REPO: &str = "cnki-citation";

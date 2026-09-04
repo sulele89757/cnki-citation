@@ -291,6 +291,24 @@ html[data-theme="light"]:root .nav-item.active {
 }
 .btn-ghost:hover:not(:disabled) { background: var(--fill-hover); }
 
+/* 设置界面：分组 + 操作按钮网格 */
+.set-group { margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--border-light); }
+.set-group:first-of-type { margin-top: 14px; padding-top: 0; border-top: none; }
+.set-group-title {
+  font-size: 11px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: .8px; color: var(--text-muted); margin-bottom: 14px;
+}
+.btn-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+.btn-grid .btn {
+  display: inline-flex; align-items: center; justify-content: flex-start;
+  gap: 8px; width: 100%;
+}
+.btn-icon {
+  width: 16px; height: 16px; flex-shrink: 0;
+  fill: none; stroke: currentColor; stroke-width: 1.7;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+
 .row { display: flex; align-items: center; gap: 12px; }
 .row.gap { gap: 10px; }
 .col-inputs { margin-top: 4px; }

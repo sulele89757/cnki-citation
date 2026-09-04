@@ -428,6 +428,11 @@ fn launch_browser(opts: &RunOpts, paths: &Paths) -> anyhow::Result<Browser> {
             OsStr::new("--disable-infobars"),
             OsStr::new("--no-sandbox"),
             OsStr::new("--window-size=1920,1080"),
+            // 窗口定位到屏幕外（-32000,-32000）：对 Chrome 而言这是"正常可见"窗口而非"最小化"，
+            // 渲染进程照常合成、CDP 全通 → 用户看不到浏览器也不影响抓取。
+            // 需要人工介入（验证码/登录）时，由 GUI「显示浏览器」按钮调用
+            // bring_browser_window_on_screen() 拉回屏幕。
+            OsStr::new("--window-position=-32000,-32000"),
             // 禁止后台节流：窗口被最小化 / 被其它窗口遮挡时，Chrome 会判定页面 hidden 并挂起
             // 定时器与渲染进程，导致 CNKI 页面卡住、抓取失败。加以下标志让其在后台仍照常运行，
             // 用户可放心最小化或切到别的窗口去做别的事。
@@ -651,6 +656,108 @@ pub fn run(titles: &[String], opts: &RunOpts) -> anyhow::Result<Vec<Record>> {
     }
     Ok(results)
 }
+
+/// 把「屏外运行」的驱动浏览器窗口拉回屏幕并置前。
+///
+/// 引擎以 `--window-position=-32000,-32000` 启动浏览器（正常可见态而非最小化，
+/// 规避 Chrome 最小化时合成暂停导致的卡顿）。当需要人工介入（登录 / 验证码 /
+/// 用户想看当前进度）时，GUI 调用本函数把窗口移回可见区域并置前。
+///
+/// 实现：枚举顶层窗口，找「可见 且 位置在屏外负坐标」的 Chrome/Edge 主窗口，
+/// 移动到 (0,0,1920,1080) 并置前。本工具驱动的窗口坐标 = -32000 是唯一标记，
+/// 不会误动用户自己开着的其它 Chrome 窗口。
+#[cfg(windows)]
+pub fn bring_browser_window_on_screen() {
+    use std::os::raw::{c_int, c_void};
+
+    const SWP_NOZORDER: u32 = 0x0004;
+    const SW_RESTORE: c_int = 9;
+
+    #[repr(C)]
+    struct RECT {
+        left: c_int,
+        top: c_int,
+        right: c_int,
+        bottom: c_int,
+    }
+
+    unsafe extern "system" {
+        fn EnumWindows(
+            lpEnumFunc: Option<
+                unsafe extern "system" fn(*mut c_void, *mut c_void) -> c_int,
+            >,
+            lParam: *mut c_void,
+        ) -> c_int;
+        fn GetWindowThreadProcessId(hWnd: *mut c_void, pid: *mut u32) -> u32;
+        fn IsWindowVisible(hWnd: *mut c_void) -> c_int;
+        fn GetWindowRect(hWnd: *mut c_void, rc: *mut RECT) -> c_int;
+        fn SetWindowPos(
+            hWnd: *mut c_void,
+            after: *mut c_void,
+            x: c_int,
+            y: c_int,
+            cx: c_int,
+            cy: c_int,
+            flags: u32,
+        ) -> c_int;
+        fn ShowWindow(hWnd: *mut c_void, nCmdShow: c_int) -> c_int;
+        fn OpenProcess(access: u32, inherit: c_int, pid: u32) -> *mut c_void;
+        fn QueryFullProcessImageNameW(
+            h: *mut c_void,
+            flags: u32,
+            name: *mut u16,
+            size: *mut u32,
+        ) -> c_int;
+        fn CloseHandle(h: *mut c_void) -> c_int;
+        fn SetForegroundWindow(hWnd: *mut c_void) -> c_int;
+    }
+
+    unsafe extern "system" fn proc(hwnd: *mut c_void, _lp: *mut c_void) -> c_int {
+        // 只找可见窗口（最小化到任务栏的窗口 IsWindowVisible 仍为真；这里补位置过滤）
+        if IsWindowVisible(hwnd) == 0 {
+            return 1;
+        }
+        let mut pid: u32 = 0;
+        GetWindowThreadProcessId(hwnd, &mut pid);
+        if pid == 0 {
+            return 1;
+        }
+        // 窗口位置在屏幕外（left 极负）是本工具驱动的浏览器标记
+        let mut rc = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+        if GetWindowRect(hwnd, &mut rc) == 0 || rc.left > -10000 {
+            return 1;
+        }
+        // 确认是 chrome/msedge（避免误移其它被移出屏幕的窗口）
+        const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
+        let proc_handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if proc_handle.is_null() {
+            return 1;
+        }
+        let mut buf = [0u16; 260];
+        let mut len = buf.len() as u32;
+        let ok = QueryFullProcessImageNameW(proc_handle, 0, buf.as_mut_ptr(), &mut len);
+        CloseHandle(proc_handle);
+        if ok == 0 {
+            return 1;
+        }
+        let exe = String::from_utf16_lossy(&buf[..len as usize]).to_lowercase();
+        if !(exe.contains("chrome.exe") || exe.contains("msedge.exe")) {
+            return 1;
+        }
+        // 拉回屏幕并恢复/置前
+        ShowWindow(hwnd, SW_RESTORE);
+        SetWindowPos(hwnd, std::ptr::null_mut(), 0, 0, 1920, 1080, SWP_NOZORDER);
+        SetForegroundWindow(hwnd);
+        0 // 停止枚举
+    }
+
+    unsafe {
+        EnumWindows(Some(proc), std::ptr::null_mut());
+    }
+}
+
+#[cfg(not(windows))]
+pub fn bring_browser_window_on_screen() {}
 
 #[allow(dead_code)]
 fn _unused(_: &Path) {}
