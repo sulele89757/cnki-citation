@@ -1,9 +1,12 @@
 //! Chrome 驱动引擎（对标 Python 的 Playwright 流程）
 //!
-//! 使用 headless_chrome 直接拉起**系统 Chrome** + 持久化 Profile + 去自动化标志 + stealth，
+//! 使用 headless_chrome 直接拉起**系统 Chrome/Edge** + 持久化 Profile + 去自动化标志 + stealth，
 //! 流程：首页 -> 直接构造搜索 URL -> JS 定位论文并点击「引用」-> 正则提取 GB/T 7714-2025。
+//! 若本机既无 Chrome 也无 Edge：自动从 npmmirror（Chrome for Testing 国内镜像）下载
+//! 一份 Chromium 到 `<base>/chromium` 兜底驱动（仅首次，约 200MB）。
 
 use std::ffi::OsStr;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::thread::sleep;
 use std::time::Duration;
@@ -62,15 +65,171 @@ fn log(opts: &RunOpts, msg: &str) {
     }
 }
 
-/// 探测系统已安装的 Chrome / Edge（对标 `channel="chrome"` 回退到内置 Chromium）。
+/// 兜底 Chromium 版本（Chrome for Testing；升级时与镜像目录保持同步）。
+const FALLBACK_CHROMIUM_VERSION: &str = "151.0.7922.34";
+const FALLBACK_CHROMIUM_URL: &str = "https://npmmirror.com/mirrors/chrome-for-testing/";
+
+/// 探测系统已安装的 Chrome / Edge。
+///
+/// 优先级：注册表 App Paths（HKLM/HKCU，含 per-user 安装与 WOW6432Node）
+/// → 用户目录常见位置 → 固定 Program Files 路径。
 fn find_chrome() -> Option<PathBuf> {
-    let candidates = [
+    let mut cands: Vec<PathBuf> = Vec::new();
+
+    // ① 注册表 App Paths：reg query 读默认值即可拿到完整 exe 路径
+    let reg_keys = [
+        ("HKCU", r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe"),
+        ("HKLM", r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe"),
+        ("HKLM", r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe"),
+        ("HKCU", r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\msedge.exe"),
+        ("HKLM", r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\msedge.exe"),
+        ("HKLM", r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\App Paths\msedge.exe"),
+    ];
+    for (root, key) in reg_keys {
+        let path = format!(r"{root}\{key}");
+        let out = std::process::Command::new("reg")
+            .arg("query")
+            .arg(&path)
+            .arg("/ve")
+            .output();
+        if let Ok(out) = out {
+            if out.status.success() {
+                let text = String::from_utf8_lossy(&out.stdout);
+                if let Some(p) = parse_reg_default(&text) {
+                    cands.push(PathBuf::from(p));
+                }
+            }
+        }
+    }
+
+    // ② per-user 安装（无管理员权限装到 %LOCALAPPDATA%）
+    if let Ok(home) = std::env::var("USERPROFILE") {
+        cands.push(PathBuf::from(format!(
+            r"{home}\AppData\Local\Google\Chrome\Application\chrome.exe"
+        )));
+        cands.push(PathBuf::from(format!(
+            r"{home}\AppData\Local\Microsoft\Edge\Application\msedge.exe"
+        )));
+    }
+
+    // ③ 经典 Program Files 路径
+    for p in [
         "C:/Program Files/Google/Chrome/Application/chrome.exe",
         "C:/Program Files (x86)/Google/Chrome/Application/chrome.exe",
         "C:/Program Files/Microsoft/Edge/Application/msedge.exe",
         "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
-    ];
-    candidates.iter().map(PathBuf::from).find(|p| p.exists())
+    ] {
+        cands.push(PathBuf::from(p));
+    }
+
+    cands.into_iter().find(|p| p.exists())
+}
+
+/// 从 `reg query ... /ve` 输出中解析默认值路径（兼容中英文 locale）。
+fn parse_reg_default(text: &str) -> Option<String> {
+    for line in text.lines() {
+        if !line.contains("REG_SZ") {
+            continue;
+        }
+        // "默认值类型 REG_SZ    路径(可能含空格)" —— 取 REG_SZ 之后的部分 trim 即可
+        let rest = line.split("REG_SZ").nth(1)?.trim();
+        if !rest.is_empty() && Path::new(rest).extension().is_some() {
+            return Some(rest.to_string());
+        }
+    }
+    None
+}
+
+/// 兜底 Chromium 的 exe 路径（<base>/chromium/chrome-win64/chrome.exe）。
+fn fallback_chromium_exe(paths: &Paths) -> PathBuf {
+    paths
+        .base
+        .join("chromium")
+        .join("chrome-win64")
+        .join("chrome.exe")
+}
+
+/// 确保兜底 Chromium 就绪：已下载直接返回；否则下载+解压（npmmirror，约 200MB）。
+/// 返回 None 表示失败（调用方给用户友好报错）。
+fn ensure_fallback_chromium(
+    paths: &Paths,
+    on_log: &dyn Fn(&str),
+) -> anyhow::Result<Option<PathBuf>> {
+    let exe = fallback_chromium_exe(paths);
+    if exe.exists() {
+        return Ok(Some(exe));
+    }
+
+    let dir = paths.base.join("chromium");
+    std::fs::create_dir_all(&dir)?;
+    let url = format!(
+        "{FALLBACK_CHROMIUM_URL}{FALLBACK_CHROMIUM_VERSION}/win64/chrome-win64.zip"
+    );
+    let zip = dir.join(format!("chrome-{FALLBACK_CHROMIUM_VERSION}.zip"));
+
+    on_log("本机未检测到 Chrome / Edge，将下载 Chromium 内核保证程序可用（约 200MB，npmmirror 国内镜像，仅首次）");
+    if let Err(e) = http_download(&url, &zip, on_log) {
+        let _ = std::fs::remove_file(&zip);
+        anyhow::bail!("Chromium 下载失败：{e}");
+    }
+    on_log("下载完成，正在解压（约需 1-2 分钟）...");
+
+    // 用 Windows 自带 bsdtar（Win10 1803+ 均有）解压，产出 chrome-win64/
+    let status = std::process::Command::new("tar")
+        .arg("-xf")
+        .arg(&zip)
+        .arg("-C")
+        .arg(&dir)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+    let _ = std::fs::remove_file(&zip);
+
+    match status {
+        Ok(s) if s.success() && exe.exists() => {
+            on_log(&format!("Chromium 就绪：{}", exe.display()));
+            Ok(Some(exe))
+        }
+        _ => Ok(None),
+    }
+}
+
+/// 流式 HTTP 下载（ureq），每 ~10% 回调一条进度日志。
+fn http_download(url: &str, dest: &Path, on_log: &dyn Fn(&str)) -> anyhow::Result<()> {
+    let resp = ureq::get(url).call()?;
+    let total: u64 = resp
+        .header("Content-Length")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+    let mut reader = resp.into_reader();
+    let mut out = std::fs::File::create(dest)?;
+    let mut buf = [0u8; 1 << 20]; // 1MB 块
+    let mut got: u64 = 0;
+    let mut last_tick: Option<u64> = None;
+    loop {
+        let n = reader.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        out.write_all(&buf[..n])?;
+        got += n as u64;
+        if total > 0 {
+            let tick = got * 10 / total;
+            if last_tick != Some(tick) {
+                last_tick = Some(tick);
+                on_log(&format!(
+                    "下载 {}MB/{}MB（{}%）",
+                    got / 1048576,
+                    total / 1048576,
+                    got * 100 / total
+                ));
+            }
+        }
+    }
+    if total > 0 && got < total {
+        anyhow::bail!("下载不完整：{got}/{total} 字节");
+    }
+    Ok(())
 }
 
 /// 最小 URL 编码（unreserved 字符原样，其余按 UTF-8 字节 %XX）。
@@ -202,7 +361,7 @@ fn extract_from_tab(tab: &Tab) -> Option<String> {
 }
 
 fn launch_browser(opts: &RunOpts, paths: &Paths) -> anyhow::Result<Browser> {
-    log(opts, "1/4 启动浏览器（系统 Chrome + 持久化 Profile）");
+    log(opts, "1/4 启动浏览器（Chrome/Edge → 无则自动下载 Chromium）");
     let mut builder = LaunchOptionsBuilder::default();
     builder
         .headless(false)
@@ -216,11 +375,28 @@ fn launch_browser(opts: &RunOpts, paths: &Paths) -> anyhow::Result<Browser> {
         .ignore_default_args(vec![OsStr::new("--enable-automation")])
         .window_size(Some((1920, 1080)))
         .idle_browser_timeout(Duration::from_secs(60));
+
+    // ① 系统 Chrome / Edge（注册表 + 常见路径探测）
     if let Some(p) = find_chrome() {
-        builder.path(Some(p));
-        log(opts, "   已使用系统 Chrome");
+        builder.path(Some(p.clone()));
+        log(
+            opts,
+            &format!("   已使用系统 {}", p.file_name().unwrap_or_default().to_string_lossy()),
+        );
     } else {
-        log(opts, "   未检测到系统 Chrome，回退到 headless_chrome 自带 Chromium");
+        // ② 自动下载 Chromium 兜底（约 200MB，仅首次；日志实时透传）
+        log(opts, "   未检测到系统 Chrome / Edge");
+        let on_log = |m: &str| log(opts, m);
+        match ensure_fallback_chromium(paths, &on_log) {
+            Ok(Some(p)) => {
+                builder.path(Some(p));
+                log(opts, "   已使用自动下载的 Chromium（首次已联网下载）");
+            }
+            Ok(None) => anyhow::bail!(
+                "Chromium 自动下载/解压后不可用。\n请安装 Google Chrome 或 Microsoft Edge 后重试。"
+            ),
+            Err(e) => anyhow::bail!("Chromium 兜底失败：{e:#}"),
+        }
     }
     let options = builder.build()?;
     let browser = Browser::new(options)?;

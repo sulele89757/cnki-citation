@@ -20,6 +20,7 @@ import json
 import sys
 import random
 import argparse
+import zipfile
 import urllib.request
 import urllib.parse
 import ssl
@@ -46,6 +47,15 @@ OUTPUT_DIR = BASE_DIR / "output"
 PROFILE_DIR = BASE_DIR / ".chrome_profile"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+
+# ── Chromium 兜底（本机既无 Chrome 也无 Edge 时，自动下载一份可驱动内核）──
+# Chrome for Testing 版本号：与下载镜像的目录一致，升级 Chromium 时同步改这里。
+# 官方源(慢) https://storage.googleapis.com/chrome-for-testing-public/<ver>/win64/chrome-win64.zip
+CHROMIUM_VERSION = "151.0.7922.34"
+CHROMIUM_DIR = BASE_DIR / "chromium"
+CHROMIUM_EXE = CHROMIUM_DIR / "chrome-win64" / "chrome.exe"
+CHROMIUM_URL = (f"https://npmmirror.com/mirrors/chrome-for-testing/"
+                f"{CHROMIUM_VERSION}/win64/chrome-win64.zip")
 
 CNKI_HOME = "https://www.cnki.net"
 
@@ -170,6 +180,62 @@ def log(tag: str, msg: str = ""):
         print(text)
 
 
+def _download_with_progress(url: str, dest: Path) -> None:
+    """流式下载文件到 dest，每 ~10% 打一条日志。失败抛异常。"""
+    req = urllib.request.Request(url, headers={"User-Agent": "CNKI-Citation-Tool/1.0"})
+    with urllib.request.urlopen(req, timeout=60, context=_ssl_ctx()) as resp:
+        total = int(resp.headers.get("Content-Length") or 0)
+        got, last_tick = 0, -1
+        with open(dest, "wb") as f:
+            while True:
+                chunk = resp.read(1 << 20)          # 1MB 块
+                if not chunk:
+                    break
+                f.write(chunk)
+                got += len(chunk)
+                if total and got * 10 // total != last_tick:
+                    last_tick = got * 10 // total
+                    log("下载", f"{got / 1048576:.0f}/{total / 1048576:.0f} MB（{got * 100 // total}%）")
+    if total and got < total:
+        raise RuntimeError(f"下载不完整：{got}/{total} 字节")
+
+
+def ensure_fallback_chromium() -> Optional[Path]:
+    """确保本地存在可驱动的 Chromium。
+
+    - 已下载（BASE_DIR/chromium/chrome-win64/chrome.exe）→ 直接返回路径
+    - 未下载 → 从 npmmirror 国内镜像下载并解压（约 200MB，仅首次）
+    - 失败 → 返回 None（上层给出友好报错）
+    """
+    if CHROMIUM_EXE.exists():
+        return CHROMIUM_EXE
+    log("下载", "本机未检测到 Chrome / Edge，将下载 Chromium 内核保证程序可用")
+    log("下载", f"体积约 200MB，来源 npmmirror 国内镜像（仅首次需要）")
+    CHROMIUM_DIR.mkdir(parents=True, exist_ok=True)
+    zip_path = CHROMIUM_DIR / f"chrome-{CHROMIUM_VERSION}.zip"
+    try:
+        if not zip_path.exists() or zip_path.stat().st_size < 10_000_000:
+            _download_with_progress(CHROMIUM_URL, zip_path)
+        log("解压", "下载完成，正在解压（约需 1-2 分钟）...")
+        with zipfile.ZipFile(zip_path) as zf:
+            # 只解压 chrome-win64/ 前缀条目（兼顾 zip-slip 防护）
+            names = [n for n in zf.namelist()
+                     if n.split("/", 1)[0] in ("chrome-win64",)]
+            zf.extractall(CHROMIUM_DIR, members=names)
+        zip_path.unlink(missing_ok=True)
+        if CHROMIUM_EXE.exists():
+            log("   ", f"Chromium 就绪：{CHROMIUM_EXE}")
+            return CHROMIUM_EXE
+        raise RuntimeError("解压完成但未找到 chrome.exe")
+    except Exception as e:
+        log("错误", f"Chromium 下载失败：{e}")
+        try:
+            zip_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        return None
+
+
 async def user_confirm(prompt: str = "完成后按回车继续..."):
     """在事件循环外等待用户输入"""
     loop = asyncio.get_event_loop()
@@ -264,7 +330,7 @@ async def start_browser(p, connect: bool = False, cdp: str = "http://localhost:9
         await Stealth().apply_stealth_async(page)
         return context, page, False
 
-    log("1/4", "启动浏览器（系统 Chrome + 持久化 Profile）")
+    log("1/4", "启动浏览器（Chrome → Edge → 内置/自动下载 Chromium）")
 
     common = dict(
         headless=False,
@@ -280,18 +346,53 @@ async def start_browser(p, connect: bool = False, cdp: str = "http://localhost:9
         ],
     )
 
+    async def _launch(channel: str = None, executable_path: str = None, label: str = ""):
+        kwargs = dict(common)
+        if channel:
+            kwargs["channel"] = channel
+        if executable_path:
+            kwargs["executable_path"] = executable_path
+        ctx = await p.chromium.launch_persistent_context(
+            user_data_dir=str(PROFILE_DIR), **kwargs)
+        log("   ", label)
+        return ctx
+
     context = None
-    # 优先使用系统真实 Chrome（指纹最真实）
-    try:
-        context = await p.chromium.launch_persistent_context(
-            user_data_dir=str(PROFILE_DIR), channel="chrome", **common
-        )
-        log("   ", "已使用系统 Google Chrome")
-    except Exception as e:
-        log("   ", f"系统 Chrome 不可用（{e}），回退到内置 Chromium")
-        context = await p.chromium.launch_persistent_context(
-            user_data_dir=str(PROFILE_DIR), **common
-        )
+    # ① 系统真实 Chrome / Edge（指纹最真实，Playwright 按注册表定位）
+    for ch, name in (("chrome", "已使用系统 Google Chrome"),
+                     ("msedge", "未找到 Chrome，已使用系统 Microsoft Edge")):
+        try:
+            context = await _launch(channel=ch, label=name)
+            break
+        except Exception as e:
+            log("   ", f"{ch} 不可用（{str(e)[:90]}）")
+
+    # ② Playwright 自带的 Chromium（本机曾执行 playwright install 时有缓存）
+    if context is None:
+        try:
+            bundled = Path(p.chromium.executable_path)
+            if bundled.exists():
+                context = await _launch(executable_path=str(bundled),
+                                        label="已使用 Playwright 内置 Chromium")
+            else:
+                log("   ", "Playwright 内置 Chromium 未安装")
+        except Exception as e:
+            log("   ", f"内置 Chromium 不可用（{str(e)[:90]}）")
+
+    # ③ 自动下载 Chromium 兜底（约 200MB，仅首次；GUI 下日志实时可见）
+    if context is None:
+        loop = asyncio.get_running_loop()
+        exe = await loop.run_in_executor(None, ensure_fallback_chromium)
+        if exe:
+            try:
+                context = await _launch(executable_path=str(exe),
+                                        label="已使用自动下载的 Chromium")
+            except Exception as e:
+                raise RuntimeError(f"自动下载的 Chromium 启动失败：{e}")
+        else:
+            raise RuntimeError(
+                "本机未检测到 Chrome / Edge，且 Chromium 自动下载失败。\n"
+                "请安装 Google Chrome 或 Microsoft Edge 后重试。")
 
     page = context.pages[0] if context.pages else await context.new_page()
     await Stealth().apply_stealth_async(page)
